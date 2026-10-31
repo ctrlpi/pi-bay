@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Python
+*.py[cod]
+__pycache__/
+
+# Env & Logs
+venv/
+.venv/
+.env
+.env.local
+*.log*
+
+# macOS
+.DS_Store
+.AppleDouble
+._*
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Project-specific state & configuration
+config.json
+config-*.json

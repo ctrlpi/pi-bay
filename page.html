@@ -1,0 +1,3347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi Bay</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('ctrlpi-theme') || localStorage.getItem('theme');
+      if (saved === 'dark' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark-mode');
+      }
+    } catch (e) {}
+  })();
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #1f2328;
+    background: #ffffff;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar (brand · device pills · refresh · tabs · theme · menu) ── */
+  #topbar {
+    flex: 0 0 auto;
+    min-height: 46px;
+    height: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    padding: 0 16px;
+    z-index: 20;
+  }
+  #topbar .brand {
+    font-weight: 600;
+    font-size: 14px;
+    color: #1f2328;
+    margin-right: 6px;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #topbar .brand:hover {
+    color: #0969da;
+  }
+
+  #pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 5px 0;
+    min-width: 0;
+  }
+  #pills .no-board {
+    font-size: 11px;
+    color: #656d76;
+    margin-right: 4px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #24292f;
+    background: #fff;
+    border: 1px solid rgba(31,35,40,0.15);
+    border-radius: 999px;
+    padding: 3px 10px;
+    cursor: pointer;
+    line-height: 18px;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: all 120ms ease;
+  }
+  .pill:hover {
+    background: #f3f4f6;
+    border-color: rgba(31,35,40,0.3);
+  }
+  .pill.active {
+    background: #ddf4ff;
+    border-color: #54aeff;
+    color: #0969da;
+  }
+  .pill .pico-icon {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    color: #1a7f37;
+    position: relative;
+    top: -0.5px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .pill.active .pico-icon {
+    color: #0969da;
+  }
+  .pill .serial {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #57606a;
+  }
+  .pill.active .serial {
+    color: #0969da;
+  }
+  .pill .badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(31,35,40,0.06);
+    color: #57606a;
+    font-weight: 600;
+  }
+  .pill.active .badge {
+    background: rgba(9,105,218,0.15);
+    color: #0969da;
+  }
+
+  .spacer { flex: 1; min-width: 8px; }
+
+  /* ── Tabs (Devices · Files · Terminal) ── */
+  .tabs {
+    display: flex;
+    align-self: stretch;
+    align-items: flex-end;
+    gap: 4px;
+    height: 100%;
+    margin-right: 6px;
+    flex-shrink: 0;
+  }
+  .tab {
+    height: 38px;
+    padding: 0 14px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: #57606a;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    transition: all 120ms ease;
+  }
+  .tab:hover {
+    color: #1f2328;
+    background: rgba(31,35,40,0.05);
+  }
+  .tab.tab-active {
+    color: #0969da;
+    border-bottom-color: #0969da;
+    background: transparent;
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #24292f;
+    line-height: 18px;
+    background: #fff;
+    border: 1px solid rgba(31,35,40,0.15);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 120ms ease;
+  }
+  .btn:hover:not(:disabled) {
+    background: #f3f4f6;
+    border-color: rgba(31,35,40,0.3);
+  }
+  .btn:active:not(:disabled) {
+    background: #eaeef2;
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn.icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+  .btn.icon svg {
+    pointer-events: none;
+  }
+  .btn.primary {
+    background: #1f883d;
+    border-color: rgba(31,35,40,0.15);
+    color: #fff;
+  }
+  .btn.primary:hover:not(:disabled) {
+    background: #1a7f37;
+  }
+  .btn.danger, .btn.del {
+    color: #cf222e;
+  }
+  .btn.danger:hover:not(:disabled), .btn.del:hover:not(:disabled) {
+    background: #ffebe9;
+    border-color: #cf222e;
+    color: #cf222e;
+  }
+
+  #refresh-btn, #card-refresh-btn {
+    background: transparent;
+    border-color: transparent;
+    flex-shrink: 0;
+  }
+  #refresh-btn:hover:not(:disabled), #card-refresh-btn:hover:not(:disabled) {
+    background: rgba(31,35,40,0.06);
+    color: #0969da;
+  }
+  #refresh-btn.refreshing, #card-refresh-btn.refreshing {
+    background: transparent;
+    border-color: transparent;
+    color: #0969da;
+    opacity: 1;
+  }
+  #refresh-btn.refreshing svg, #card-refresh-btn.refreshing svg {
+    animation: refresh-spin 700ms linear infinite;
+  }
+  @keyframes refresh-spin { to { transform: rotate(360deg); } }
+
+  /* ── Theme Toggle ── */
+  .theme-toggle-btn {
+    background: transparent;
+    border: none;
+    color: #57606a;
+    cursor: pointer;
+    padding: 4px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: all 120ms ease;
+  }
+  .theme-toggle-btn:hover {
+    background: rgba(31,35,40,0.06);
+    color: #1f2328;
+  }
+  .theme-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
+  }
+  .moon-icon { display: none; }
+  .sun-icon { display: block; }
+  .theme-toggle-btn .sun-icon { color: #eab308; }
+  html.dark-mode .moon-icon { display: block; }
+  html.dark-mode .sun-icon { display: none; }
+
+  /* ── Overflow Menu ("...") ── */
+  #menuwrap { position: relative; flex-shrink: 0; }
+  #menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 32px;
+    z-index: 50;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(140,149,159,0.2);
+    padding: 4px;
+    min-width: 200px;
+  }
+  #menu.open { display: block; }
+  #menu button, #menu a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    text-align: left;
+    font-size: 12px;
+    color: #1f2328;
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    padding: 6px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: background 100ms ease;
+  }
+  #menu button:hover, #menu a:hover {
+    background: #f3f4f6;
+  }
+  #menu button:disabled {
+    color: #8c959f;
+    cursor: not-allowed;
+  }
+  #menu button:disabled:hover {
+    background: none;
+  }
+  #menu button.danger {
+    color: #cf222e;
+  }
+  #menu button.danger:hover {
+    background: #ffebe9;
+  }
+  #menu hr {
+    border: 0;
+    border-top: 1px solid #d0d7de;
+    margin: 4px 0;
+  }
+  #menu button.menu-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #menu .menu-label-detail {
+    font-size: 10px;
+    color: #57606a;
+  }
+  #menu .menu-checkmark {
+    color: #0969da;
+    flex: 0 0 auto;
+    transition: opacity 120ms ease;
+  }
+  #menu .menu-checkmark path {
+    stroke-width: 1.5;
+  }
+  #menu .menu-state-icons {
+    position: relative;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+  }
+  #menu .menu-state-icons svg {
+    position: absolute;
+    inset: 0;
+    transition: opacity 120ms ease;
+  }
+  #menu .menu-off {
+    color: #cf222e;
+  }
+  #menu-hidden-files .menu-checkmark {
+    opacity: 0;
+  }
+  #menu-hidden-files.active .menu-checkmark {
+    opacity: 1;
+  }
+  #mcp-toggle:not(.showing) .menu-checkmark {
+    opacity: 1;
+  }
+  #mcp-toggle.showing .menu-checkmark {
+    opacity: 0;
+  }
+  #mcp-toggle:not(.showing) .menu-off {
+    opacity: 0;
+  }
+  #mcp-toggle.showing .menu-off {
+    opacity: 1;
+  }
+
+  /* ── Hover Tooltip ── */
+  #hover-tooltip {
+    position: fixed;
+    z-index: 300;
+    display: none;
+    pointer-events: none;
+    max-width: min(320px, calc(100vw - 16px));
+    padding: 5px 9px;
+    color: #24292f;
+    background: #fff;
+    border: 1px solid rgba(31,35,40,0.15);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(31,35,40,0.15);
+    font-size: 11px;
+    line-height: 15px;
+    white-space: pre-line;
+    word-break: break-word;
+  }
+
+  /* ── GitHub-style Markdown & README ── */
+  #md, #readme-content {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 32px 32px 80px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: #1f2328;
+  }
+  #md { display: none; }
+  #readme-screen {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: #fff;
+  }
+  #readme-content { width: 100%; }
+  #md h1, #md h2, #readme-content h1, #readme-content h2 {
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #d0d7de;
+  }
+  #md h1, #readme-content h1 { font-size: 2em; margin: 0.67em 0 16px; font-weight: 600; }
+  #md h2, #readme-content h2 { font-size: 1.5em; margin-top: 24px; margin-bottom: 16px; font-weight: 600; }
+  #md h3, #readme-content h3 { font-size: 1.25em; margin-top: 24px; margin-bottom: 16px; font-weight: 600; }
+  #md p, #readme-content p { margin-top: 0; margin-bottom: 16px; }
+  #md a, #readme-content a { color: #0969da; text-decoration: none; }
+  #md a:hover, #readme-content a:hover { text-decoration: underline; }
+  #md code, #readme-content code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 85%;
+    padding: 0.2em 0.4em;
+    background: rgba(175,184,193,0.2);
+    border-radius: 6px;
+  }
+  #md pre, #readme-content pre {
+    font-size: 85%;
+    line-height: 1.45;
+    background: #f6f8fa;
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    margin-bottom: 16px;
+  }
+  #md pre code, #readme-content pre code { background: transparent; padding: 0; }
+  #md ul, #md ol, #readme-content ul, #readme-content ol { margin-top: 0; margin-bottom: 16px; padding-left: 2em; }
+  #md blockquote, #readme-content blockquote {
+    margin: 0 0 16px;
+    padding: 0 1em;
+    color: #57606a;
+    border-left: 4px solid #d0d7de;
+  }
+  #md table, #readme-content table {
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    width: 100%;
+  }
+  #md table th, #md table td, #readme-content table th, #readme-content table td {
+    padding: 6px 13px;
+    border: 1px solid #d0d7de;
+    font-size: inherit;
+  }
+  #md table th, #readme-content table th {
+    background: #f6f8fa;
+    font-weight: 600;
+  }
+  #md hr, #readme-content hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #d0d7de;
+    border: 0;
+  }
+  #md img, #readme-content img {
+    max-width: 100%;
+    vertical-align: middle;
+  }
+
+  /* ── Views ── */
+  .view {
+    display: none;
+    flex: 1;
+    min-height: 0;
+  }
+  .view.active {
+    display: flex;
+  }
+
+  /* ── Discovery View ── */
+  #discovery {
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    background: #fff;
+    overflow: auto;
+  }
+  .card {
+    width: min(940px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #d0d7de;
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(31,35,40,0.08);
+    overflow: hidden;
+    background: #fff;
+  }
+  .cardhead {
+    padding: 16px 20px;
+    border-bottom: 1px solid #d0d7de;
+    display: flex;
+    align-items: center;
+    background: #f6f8fa;
+  }
+  .cardhead h1 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+    color: #1f2328;
+  }
+  .sub {
+    color: #656d76;
+    font-size: 12px;
+    margin-top: 3px;
+  }
+  .scrolltable {
+    overflow: auto;
+    flex: 1;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid #eaeef2;
+    font-size: 13px;
+  }
+  th {
+    font-size: 12px;
+    font-weight: 600;
+    background: #f6f8fa;
+    color: #57606a;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  tbody tr {
+    cursor: pointer;
+  }
+  tbody tr:hover {
+    background: #f6f8fa;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: #f6f8fa;
+    color: #57606a;
+    font-weight: 500;
+  }
+  .badge.pico, .badge.esp32 {
+    background: #dafbe1;
+    color: #116329;
+  }
+  .badge.pi {
+    background: #ddf4ff;
+    color: #0969da;
+  }
+  .hw-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    flex-wrap: wrap;
+  }
+  .hw-chip {
+    font-size: 10px;
+    line-height: 16px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: rgba(31,35,40,0.06);
+    color: #57606a;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .ssh-ok {
+    color: #1a7f37;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .ssh-no {
+    color: #8c959f;
+  }
+  .ctrl-version {
+    color: #1a7f37;
+    font-size: 12px;
+  }
+  .empty {
+    text-align: center;
+    color: #656d76;
+    padding: 48px;
+  }
+
+  /* ── Workspace ── */
+  #workspace {
+    flex-direction: row;
+    position: relative;
+    background: #fff;
+  }
+  #sidebar {
+    width: 300px;
+    min-width: 180px;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  #dragbar {
+    width: 5px;
+    cursor: col-resize;
+    background: #d0d7de;
+    flex-shrink: 0;
+    transition: background 120ms ease;
+  }
+  #dragbar:hover, #dragbar.dragging {
+    background: #0969da;
+  }
+
+  #search-wrap {
+    padding: 8px 12px;
+    border-bottom: 1px solid #d0d7de;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  #filter {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 5px 9px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    outline: none;
+    color: #1f2328;
+    background: #fff;
+  }
+  #filter:focus {
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9,105,218,0.2);
+  }
+
+  #files {
+    overflow-y: auto;
+    flex: 1;
+  }
+  .file {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    border-bottom: 1px solid #f6f8fa;
+    user-select: none;
+  }
+  .file:hover {
+    background: #f6f8fa;
+  }
+  .file.sel {
+    background: #ddf4ff;
+    color: #0969da;
+  }
+  .file .twist {
+    font-size: 8px;
+    color: #8c959f;
+    width: 10px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .file svg.ficon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: #57606a;
+  }
+  .file.dir svg.ficon {
+    color: #0969da;
+  }
+  .file.sel svg.ficon {
+    color: #0969da;
+  }
+  .file .fname {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .file.dir .fname {
+    font-weight: 600;
+  }
+  .file .fmeta {
+    font-size: 10px;
+    color: #8c959f;
+    margin-left: auto;
+    flex-shrink: 0;
+    padding-right: 32px;
+  }
+  .file .acts {
+    display: none;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    gap: 2px;
+  }
+  .file:hover .acts {
+    display: flex;
+  }
+  .file .acts button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    cursor: pointer;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    color: #57606a;
+  }
+  .file .acts button:hover {
+    color: #0969da;
+    border-color: #0969da;
+  }
+  .file .acts button.del:hover {
+    color: #cf222e;
+    border-color: #cf222e;
+  }
+  .file .acts button svg {
+    width: 11px;
+    height: 11px;
+  }
+  #dirlist td {
+    padding: 7px 14px;
+  }
+  #dirlist .dname {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+  }
+  #dirlist tr.dir .dname {
+    font-weight: 600;
+  }
+  #dirlist svg.ficon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: #57606a;
+  }
+  #dirlist tr.dir svg.ficon {
+    color: #0969da;
+  }
+  #dirlist .dmeta {
+    color: #656d76;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .file.dragging {
+    opacity: 0.5;
+  }
+  .file.drop-target {
+    background: #ddf4ff;
+    box-shadow: inset 0 0 0 2px #0969da;
+  }
+  #content.dropping,
+  #files.dropping {
+    background: rgba(9,105,218,0.06);
+    box-shadow: inset 0 0 0 2px #0969da;
+  }
+  #upload-hint {
+    padding: 14px 12px;
+    font-size: 11px;
+    color: #8c959f;
+    text-align: center;
+  }
+
+  /* ── Move-to-folder dropdown ── */
+  #movewrap { position: relative; display: inline-flex; }
+  #save.btn.primary { background: #0969da; border-color: #0969da; }
+  #save.btn.primary:hover:not(:disabled) { background: #0860ca; }
+  html.dark-mode #save.btn.primary { background: #1f6feb; border-color: #1f6feb; }
+  html.dark-mode #save.btn.primary:hover:not(:disabled) { background: #388bfd; }
+  #move-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 32px;
+    z-index: 50;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(140,149,159,0.2);
+    padding: 4px;
+    min-width: 200px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  #move-menu.open { display: block; }
+  #move-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #1f2328;
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    padding: 6px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #move-menu button:hover { background: #f3f4f6; }
+  #move-menu .move-empty { padding: 6px 10px; font-size: 12px; color: #8c959f; }
+
+  /* ── Right Content Area ── */
+  #right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: #fff;
+  }
+  #toolbar {
+    height: 44px;
+    border-bottom: 1px solid #d0d7de;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    background: #f6f8fa;
+    flex-shrink: 0;
+  }
+  #filename {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #dirty {
+    font-size: 10px;
+    color: #bc4c00;
+    background: #fff8c5;
+    border: 1px solid #d4a72c;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-weight: 600;
+    display: none;
+  }
+  #content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 20px;
+    position: relative;
+  }
+  #content pre {
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  #editor {
+    display: none;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    resize: none;
+    outline: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #1f2328;
+    background: #fff;
+    tab-size: 4;
+  }
+  .placeholder {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #656d76;
+    gap: 12px;
+  }
+  .placeholder svg {
+    color: #8c959f;
+  }
+  .welcome-content {
+    max-width: 520px;
+    text-align: center;
+    line-height: 1.7;
+    font-size: 13px;
+  }
+  .welcome-content p { margin: 4px 0 14px; }
+  .welcome-content .welcome-heading { color: #1f883d; }
+
+  /* ── Terminal (Full-screen tab view) ── */
+  #terminalBox {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    background: #fff;
+    overflow: hidden;
+  }
+  #terminal {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 12px;
+    background: #fff;
+    overflow: hidden;
+  }
+  #workspace.terminal-mode #sidebar,
+  #workspace.terminal-mode #dragbar,
+  #workspace.terminal-mode #toolbar,
+  #workspace.terminal-mode #content {
+    display: none !important;
+  }
+  #workspace.terminal-mode #terminalBox {
+    display: flex !important;
+  }
+
+  /* ── Animated Busy Bar ── */
+  #busy {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 100%;
+    z-index: 100;
+    background: linear-gradient(90deg, transparent, #0969da, transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    display: none;
+    animation: busy-slide 1s linear infinite;
+  }
+  #busy.on { display: block; }
+  @keyframes busy-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+
+  /* ── Dialog / Modal ── */
+  #app-dialog {
+    width: min(440px, calc(100vw - 32px));
+    margin: auto;
+    border: 1px solid #d0d7de;
+    border-radius: 10px;
+    background: #fff;
+    color: #1f2328;
+    box-shadow: 0 16px 48px rgba(31,35,40,0.25);
+    padding: 0;
+  }
+  #app-dialog::backdrop {
+    background: rgba(31,35,40,0.38);
+  }
+  #dialog-form {
+    padding: 20px;
+  }
+  #dialog-title {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 8px;
+  }
+  #dialog-message a { color: #0969da; }
+  #dialog-message {
+    color: #57606a;
+    font-size: 13px;
+    white-space: pre-line;
+    line-height: 1.5;
+  }
+  #dialog-input {
+    display: none;
+    width: 100%;
+    margin-top: 14px;
+    padding: 7px 10px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+    color: #1f2328;
+    background: #fff;
+  }
+  #dialog-input.visible { display: block; }
+  #dialog-input:focus {
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9,105,218,0.2);
+  }
+  #dialog-footer { margin-right: auto; color: #57606a; font-size: 12px; }
+  #dialog-footer a { color: #0969da; text-decoration: none; }
+  #dialog-footer a:hover { text-decoration: underline; }
+  #dialog-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+  #dialog-confirm.dialog-danger {
+    background: #cf222e;
+    border-color: #cf222e;
+    color: #fff;
+  }
+  #dialog-confirm.dialog-danger:hover {
+    background: #a40e26;
+  }
+
+  /* ── Login Modal ── */
+  .modalback {
+    position: fixed;
+    inset: 0;
+    background: rgba(31,35,40,0.38);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 40;
+  }
+  .modalback.open { display: flex; }
+  .modal {
+    width: min(420px, calc(100% - 32px));
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid #d0d7de;
+    padding: 22px;
+    box-shadow: 0 16px 48px rgba(31,35,40,0.25);
+  }
+  .modal h2 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .field {
+    display: block;
+    margin-top: 14px;
+  }
+  .field span {
+    display: block;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 5px;
+    color: #24292f;
+  }
+  .field input[type=text], .field input[type=password] {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    outline: none;
+    font-size: 13px;
+    background: #fff;
+    color: #1f2328;
+  }
+  .field input[type=text]:focus, .field input[type=password]:focus {
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9,105,218,0.2);
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+  .choice-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 2px;
+  }
+  .choice-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .modal .hint {
+    color: #57606a;
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 12px;
+  }
+  .error {
+    color: #cf222e;
+    font-size: 12px;
+    margin-top: 10px;
+    min-height: 18px;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f2328;
+    color: #fff;
+    font-size: 12px;
+    padding: 7px 16px;
+    border-radius: 6px;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    max-width: 80vw;
+  }
+  #toast.show { opacity: 1; }
+  #toast.bad { background: #cf222e; }
+  #toast.good { background: #1a7f37; }
+
+  /* ── Dark Mode ── */
+  html.dark-mode body {
+    color: #e6edf3;
+    background: #0d1117;
+  }
+  html.dark-mode #topbar {
+    background: #161b22;
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode #topbar .brand {
+    color: #e6edf3;
+  }
+  html.dark-mode #pills .no-board {
+    color: #8b949e;
+  }
+  html.dark-mode .pill {
+    color: #c9d1d9;
+    background: #21262d;
+    border-color: #30363d;
+  }
+  html.dark-mode .pill:hover {
+    background: #30363d;
+    border-color: #8b949e;
+  }
+  html.dark-mode .pill.active {
+    background: rgba(56,139,253,0.15);
+    border-color: #388bfd;
+    color: #58a6ff;
+  }
+  html.dark-mode .pill.active .pico-icon {
+    color: #58a6ff;
+  }
+  html.dark-mode .pill.active .serial {
+    color: #58a6ff;
+  }
+  html.dark-mode .pill .serial {
+    color: #8b949e;
+  }
+  html.dark-mode .pill .badge {
+    background: rgba(240,246,252,0.1);
+    color: #8b949e;
+  }
+  html.dark-mode .pill.active .badge {
+    background: rgba(56,139,253,0.25);
+    color: #58a6ff;
+  }
+  html.dark-mode .tab {
+    color: #8b949e;
+  }
+  html.dark-mode .tab:hover {
+    color: #e6edf3;
+    background: rgba(240,246,252,0.08);
+  }
+  html.dark-mode .tab.tab-active {
+    color: #58a6ff;
+    border-bottom-color: #58a6ff;
+  }
+  html.dark-mode .btn {
+    color: #c9d1d9;
+    background: #21262d;
+    border-color: #30363d;
+  }
+  html.dark-mode .btn:hover:not(:disabled) {
+    background: #30363d;
+    border-color: #8b949e;
+  }
+  html.dark-mode .btn:active:not(:disabled) {
+    background: #282e33;
+  }
+  html.dark-mode .btn.primary {
+    background: #238636;
+    border-color: rgba(240,246,252,0.1);
+    color: #fff;
+  }
+  html.dark-mode .btn.primary:hover:not(:disabled) {
+    background: #2ea043;
+  }
+  html.dark-mode .btn.danger, html.dark-mode .btn.del {
+    color: #f85149;
+  }
+  html.dark-mode .btn.danger:hover:not(:disabled), html.dark-mode .btn.del:hover:not(:disabled) {
+    background: rgba(248,81,73,0.15);
+    border-color: #f85149;
+    color: #f85149;
+  }
+  html.dark-mode #refresh-btn:hover:not(:disabled), html.dark-mode #card-refresh-btn:hover:not(:disabled) {
+    background: rgba(240,246,252,0.08);
+  }
+  html.dark-mode #refresh-btn.refreshing, html.dark-mode #card-refresh-btn.refreshing {
+    color: #58a6ff;
+  }
+  html.dark-mode .theme-toggle-btn {
+    color: #8b949e;
+  }
+  html.dark-mode .theme-toggle-btn:hover {
+    background: rgba(240,246,252,0.08);
+    color: #e6edf3;
+  }
+  html.dark-mode #menu {
+    background: #161b22;
+    border-color: #30363d;
+    box-shadow: 0 8px 24px rgba(1,4,9,0.5);
+  }
+  html.dark-mode #menu button, html.dark-mode #menu a {
+    color: #c9d1d9;
+  }
+  html.dark-mode #menu button:hover, html.dark-mode #menu a:hover {
+    background: #21262d;
+  }
+  html.dark-mode #menu button.danger {
+    color: #f85149;
+  }
+  html.dark-mode #menu button.danger:hover {
+    background: rgba(248,81,73,0.15);
+  }
+  html.dark-mode #menu hr {
+    border-top-color: #30363d;
+  }
+  html.dark-mode #menu .menu-label-detail {
+    color: #8b949e;
+  }
+  html.dark-mode #menu .menu-state-icons .menu-checkmark,
+  html.dark-mode #menu-hidden-files .menu-checkmark {
+    color: #58a6ff;
+  }
+  html.dark-mode #menu .menu-state-icons .menu-off {
+    color: #f85149;
+  }
+  html.dark-mode #menu-install-ctrlpi {
+    color: #58a6ff !important;
+  }
+  html.dark-mode #discovery, html.dark-mode #workspace, html.dark-mode #sidebar, html.dark-mode #right {
+    background: #0d1117;
+  }
+  html.dark-mode .card {
+    background: #0d1117;
+    border-color: #30363d;
+  }
+  html.dark-mode .cardhead {
+    background: #161b22;
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode .cardhead h1 {
+    color: #e6edf3;
+  }
+  html.dark-mode .sub {
+    color: #8b949e;
+  }
+  html.dark-mode th {
+    background: #161b22;
+    color: #8b949e;
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode td {
+    border-bottom-color: #21262d;
+    color: #c9d1d9;
+  }
+  html.dark-mode tbody tr:hover {
+    background: #161b22;
+  }
+  html.dark-mode .badge {
+    background: #21262d;
+    color: #8b949e;
+  }
+  html.dark-mode .badge.pico, html.dark-mode .badge.esp32 {
+    background: rgba(46,160,67,0.2);
+    color: #3fb950;
+  }
+  html.dark-mode .badge.pi {
+    background: rgba(56,139,253,0.2);
+    color: #58a6ff;
+  }
+  html.dark-mode .hw-chip {
+    background: rgba(240,246,252,0.1);
+    color: #8b949e;
+  }
+  html.dark-mode #dragbar {
+    background: #30363d;
+  }
+  html.dark-mode #dragbar:hover, html.dark-mode #dragbar.dragging {
+    background: #388bfd;
+  }
+  html.dark-mode #search-wrap {
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode #filter {
+    background: #0d1117;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+  html.dark-mode #filter:focus {
+    border-color: #388bfd;
+    box-shadow: 0 0 0 2px rgba(56,139,253,0.2);
+  }
+  html.dark-mode .file {
+    border-bottom-color: #161b22;
+    color: #c9d1d9;
+  }
+  html.dark-mode #dirlist svg.ficon, html.dark-mode #dirlist .dmeta {
+    color: #8b949e;
+  }
+  html.dark-mode #dirlist tr.dir svg.ficon {
+    color: #58a6ff;
+  }
+  html.dark-mode .file:hover {
+    background: #161b22;
+  }
+  html.dark-mode .file.sel {
+    background: rgba(56,139,253,0.15);
+    color: #58a6ff;
+  }
+  html.dark-mode .file .acts button {
+    background: #21262d;
+    border-color: #30363d;
+    color: #8b949e;
+  }
+  html.dark-mode .file .acts button:hover {
+    color: #58a6ff;
+    border-color: #58a6ff;
+  }
+  html.dark-mode .file .acts button.del:hover {
+    color: #f85149;
+    border-color: #f85149;
+  }
+  html.dark-mode #toolbar {
+    background: #161b22;
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode #dirty {
+    color: #f0883e;
+    background: rgba(240,136,62,0.15);
+    border-color: rgba(240,136,62,0.4);
+  }
+  html.dark-mode #editor {
+    background: #0d1117;
+    color: #e6edf3;
+  }
+  html.dark-mode #content {
+    background: #0d1117;
+    color: #e6edf3;
+  }
+  html.dark-mode #terminalBox {
+    background: #0d1117;
+  }
+  html.dark-mode #terminal {
+    background: #0d1117;
+  }
+  html.dark-mode #app-dialog {
+    background: #161b22;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+  html.dark-mode #dialog-message a { color: #58a6ff; }
+  html.dark-mode #dialog-footer { color: #8b949e; }
+  html.dark-mode #dialog-footer a { color: #58a6ff; }
+  html.dark-mode #dialog-message {
+    color: #8b949e;
+  }
+  html.dark-mode #dialog-input {
+    background: #0d1117;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+  html.dark-mode .modal {
+    background: #161b22;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+  html.dark-mode .modal .hint, html.dark-mode #upload-hint { color: #8b949e; }
+  html.dark-mode .welcome-content .welcome-heading { color: #3fb950; }
+  html.dark-mode .file.drop-target { background: rgba(56,139,253,0.15); box-shadow: inset 0 0 0 2px #58a6ff; }
+  html.dark-mode #content.dropping,
+  html.dark-mode #files.dropping { background: rgba(56,139,253,0.08); box-shadow: inset 0 0 0 2px #58a6ff; }
+  html.dark-mode #move-menu { background: #161b22; border-color: #30363d; box-shadow: 0 8px 24px rgba(1,4,9,0.5); }
+  html.dark-mode #move-menu button { color: #c9d1d9; }
+  html.dark-mode #move-menu button:hover { background: #21262d; }
+  html.dark-mode .field span {
+    color: #c9d1d9;
+  }
+  html.dark-mode .field input[type=text], html.dark-mode .field input[type=password] {
+    background: #0d1117;
+    border-color: #30363d;
+    color: #e6edf3;
+  }
+  html.dark-mode #toast {
+    background: #21262d;
+    color: #e6edf3;
+    border: 1px solid #30363d;
+  }
+  body.dark-mode #hover-tooltip, html.dark-mode #hover-tooltip {
+    color: #e6edf3;
+    background: #161b22;
+    border-color: #30363d;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+  html.dark-mode #readme-screen {
+    background: #0d1117;
+  }
+  html.dark-mode #md, html.dark-mode #readme-content {
+    color: #e6edf3;
+  }
+  html.dark-mode #md h1, html.dark-mode #md h2,
+  html.dark-mode #readme-content h1, html.dark-mode #readme-content h2 {
+    border-bottom-color: #30363d;
+  }
+  html.dark-mode #md a, html.dark-mode #readme-content a {
+    color: #58a6ff;
+  }
+  html.dark-mode #md code, html.dark-mode #readme-content code {
+    background: rgba(110,118,129,0.4);
+  }
+  html.dark-mode #md pre, html.dark-mode #readme-content pre {
+    background: #161b22;
+    border: 1px solid #30363d;
+  }
+  html.dark-mode #md blockquote, html.dark-mode #readme-content blockquote {
+    color: #8b949e;
+    border-left-color: #30363d;
+  }
+  html.dark-mode #md table th, html.dark-mode #md table td,
+  html.dark-mode #readme-content table th, html.dark-mode #readme-content table td {
+    border-color: #30363d;
+  }
+  html.dark-mode #md table th, html.dark-mode #readme-content table th {
+    background: #161b22;
+    color: #8b949e;
+  }
+  html.dark-mode #md hr, html.dark-mode #readme-content hr {
+    background-color: #30363d;
+  }
+</style>
+</head>
+<body>
+
+<div id="busy"></div>
+
+<!-- Top Bar -->
+<header id="topbar">
+  <a class="brand" href="/" onclick="showDevicesTab(); return false;" title="Show discovered devices">Pi Bay</a>
+  <div id="pills">
+    <button class="btn icon" id="refresh-btn" onclick="scan(true)" title="Scan network for devices" aria-label="Scan network">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 0 1-9.6 3.65M2.5 8a5.5 5.5 0 0 1 9.6-3.65"/><path d="M12.5 1.5v3h-3M3.5 14.5v-3h3"/></svg>
+    </button>
+  </div>
+  <span class="spacer"></span>
+  <nav class="tabs">
+    <button id="showDevices" class="tab tab-active" onclick="showDevicesTab()">Devices</button>
+    <button id="filesButton" class="tab" style="display:none" onclick="showFilesTab()">Files</button>
+    <button id="termButton" class="tab" style="display:none" onclick="showTerminalTab()">Terminal</button>
+  </nav>
+  <button id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode" aria-label="Toggle Dark/Light Mode">
+    <svg class="sun-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.75"/><path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.05 1.05M11.55 11.55l1.05 1.05M3.4 12.6l1.05-1.05M11.55 4.45l1.05-1.05"/></svg>
+    <svg class="moon-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.6A5.75 5.75 0 1 1 6.4 2.5a4.6 4.6 0 0 0 7.1 7.1Z"/></svg>
+  </button>
+  <span id="menuwrap">
+    <button class="btn icon" id="menu-btn" onclick="toggleMenu(event)" title="More actions" aria-label="More actions">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="3" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <div id="menu">
+      <button onclick="newFile()" id="menu-new-file" disabled>New file…</button>
+      <button onclick="newFolder()" id="menu-new-folder" disabled>New folder…</button>
+      <hr>
+      <button onclick="pickUpload()" id="menu-upload" disabled>Upload files…</button>
+      <button onclick="pickUploadFolder()" id="menu-upload-folder" disabled>Upload folder…</button>
+      <button id="menu-install-ctrlpi" style="color: #0969da; display: none;" onclick="installCtrlPi()">Install ctrlPi API</button>
+      <hr>
+      <button onclick="downloadZip()" id="menu-zip" disabled>Download as ZIP</button>
+      <button onclick="pickRestore()" id="menu-restore" disabled>Restore from ZIP</button>
+      <hr>
+      <button class="menu-toggle" id="menu-hidden-files" onclick="toggleHiddenFiles()">
+        <span>Show hidden files</span>
+        <svg class="menu-checkmark" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="menu-toggle showing" id="mcp-toggle" onclick="toggleMcp()" aria-pressed="false">
+        <span>MCP <span class="menu-label-detail">over Streamable HTTP</span></span>
+        <span class="menu-state-icons" id="mcp-status" aria-hidden="true">
+          <svg class="menu-checkmark" width="14" height="14" viewBox="0 0 16 16" fill="none"><path
+            d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-linecap="round"
+            stroke-linejoin="round"/></svg>
+          <svg class="menu-off" width="14" height="14" viewBox="0 0 16 16" fill="none"><path
+            d="M8 1.75v5M4.3 3.7a5.25 5.25 0 1 0 7.4 0" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round"/></svg>
+        </span>
+      </button>
+      <hr>
+      <button onclick="disconnectDevice()" id="menu-disconnect" disabled>Disconnect</button>
+      <button class="danger" onclick="togglePiUsbPower()" id="menu-usb-power" disabled>Toggle Pi USB Power</button>
+      <button class="danger" onclick="rebootDevice()" id="menu-reboot" disabled>Reboot Raspberry Pi</button>
+      <hr>
+      <button onclick="showReadme()">README.md</button>
+      <a href="https://ctrlpi.com/pinout/pi"
+        target="_blank" rel="noopener noreferrer">Pi Pinout ↗</a>
+      <button onclick="showAbout()">About Pi Bay…</button>
+    </div>
+  </span>
+</header>
+
+<!-- Hidden Upload Inputs -->
+<input type="file" id="uploadInput" multiple style="display:none" onchange="handleFilesUpload(event)">
+<input type="file" id="uploadFolderInput" webkitdirectory directory multiple style="display:none" onchange="handleFolderUpload(event)">
+<input type="file" id="restoreInput" accept=".zip,application/zip" style="display:none" onchange="handleRestore(event)">
+
+<!-- Discovery View -->
+<main id="discovery" class="view active">
+  <section class="card">
+    <div class="cardhead">
+      <div>
+        <h1>Devices on this network</h1>
+        <div id="scanText" class="sub">Scanning the local network for SSH devices…</div>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn icon" id="card-refresh-btn" onclick="scan(true)" title="Scan again" aria-label="Scan again">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 0 1-9.6 3.65M2.5 8a5.5 5.5 0 0 1 9.6-3.65"/><path d="M12.5 1.5v3h-3M3.5 14.5v-3h3"/></svg>
+      </button>
+    </div>
+    <div class="scrolltable">
+      <table>
+        <thead>
+          <tr id="deviceHead">
+            <th>Name</th>
+            <th>Device</th>
+            <th>IP address</th>
+            <th>MAC address</th>
+            <th>SSH</th>
+            <th>ctrlPi</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="6" class="empty">Scanning…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- Workspace View -->
+<main id="workspace" class="view">
+  <!-- Left: File List Sidebar -->
+  <aside id="sidebar">
+    <div id="search-wrap">
+      <input id="filter" placeholder="Filter files…" autocomplete="off">
+      <button class="btn icon" id="newFileBtn" onclick="newFile()" title="New file" aria-label="New file">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 14.5H4.5A1.5 1.5 0 0 1 3 13V3a1.5 1.5 0 0 1 1.5-1.5H9l4 4V8"/><path d="M9 1.5v4h4"/><path d="M12 10.5v4M10 12.5h4"/></svg>
+      </button>
+      <button class="btn icon" id="newDirBtn" onclick="newFolder()" title="New folder" aria-label="New folder">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5V8"/><path d="M12 9.5v4M10 11.5h4"/></svg>
+      </button>
+    </div>
+    <div id="files"></div>
+  </aside>
+
+  <!-- Resizable Divider -->
+  <div id="dragbar" title="Drag to resize sidebar"></div>
+
+  <!-- Right: Editor & Viewer -->
+  <section id="right">
+    <div id="toolbar">
+      <span id="filename"></span>
+      <span id="dirty">unsaved</span>
+      <span class="spacer"></span>
+      <button id="run" class="btn icon" style="display:none" onclick="runCurrentFile()" title="Run this file on the Pi (in the Terminal tab)" aria-label="Run">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.25"/><path d="M6.5 5.5v5l4-2.5Z" fill="currentColor"/></svg>
+      </button>
+      <button id="format-json" class="btn icon" style="display:none" onclick="formatJSON()" title="Format JSON with 3-space indentation" aria-label="Format JSON">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 2.5c-1.5 0-2 .5-2 2V6c0 1-.5 2-1.5 2 1 0 1.5 1 1.5 2v1.5c0 1.5.5 2 2 2M10.5 2.5c1.5 0 2 .5 2 2V6c0 1 .5 2 1.5 2-1 0-1.5 1-1.5 2v1.5c0 1.5-.5 2-2 2"/></svg>
+      </button>
+      <button id="download" class="btn icon" style="display:none" onclick="downloadCurrentFile()" title="Download file" aria-label="Download">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11"/></svg>
+      </button>
+      <button id="edit" class="btn icon" style="display:none" onclick="startEdit()" title="Edit file" aria-label="Edit">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.5 13.5 5.5 6 13H3v-3Z"/><path d="M9 4l3 3"/></svg>
+      </button>
+      <button id="rename" class="btn icon" style="display:none" onclick="renameCurrentFile()" title="Rename" aria-label="Rename">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5h3M6 2.5v11M4.5 13.5h3"/><path d="M8.5 5h5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-5M3.5 5h-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h1"/></svg>
+      </button>
+      <span id="movewrap" style="display:none">
+        <button id="move" class="btn icon" onclick="toggleMoveMenu(event)" title="Move to folder…" aria-label="Move to folder">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 7V4A1.5 1.5 0 0 1 3 2.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5V12a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12"/><path d="M.75 9.5h6.5M5 7.25l2.25 2.25L5 11.75"/></svg>
+        </button>
+        <div id="move-menu"></div>
+      </span>
+      <button id="remove" class="btn icon del" style="display:none" onclick="deleteCurrentFile()" title="Delete" aria-label="Delete">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4"/><path d="M3.75 4l.7 9a1.5 1.5 0 0 0 1.5 1.5h4.1a1.5 1.5 0 0 0 1.5-1.5l.7-9"/><path d="M6.5 7v4.5M9.5 7v4.5"/></svg>
+      </button>
+      <button id="cancel" class="btn icon" style="display:none" onclick="cancelEdit()" title="Cancel editing" aria-label="Cancel">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+      <button id="save" class="btn icon primary" style="display:none" onclick="saveEdit()" title="Save changes" aria-label="Save">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2h7.5l3 3v7.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2Z"/><path d="M5 2v3.5h5V2M4.75 14v-4h6.5v4"/></svg>
+      </button>
+    </div>
+    <div id="content"></div>
+    <!-- SSH Terminal (in Terminal Tab Mode) -->
+    <div id="terminalBox">
+      <div id="terminal"></div>
+    </div>
+  </section>
+</main>
+
+<!-- README View -->
+<div id="readme-screen"><article id="readme-content"></article></div>
+
+<!-- Login Modal -->
+<div id="loginBack" class="modalback">
+  <form id="login" class="modal" onsubmit="handleLoginSubmit(event)">
+    <h2>Connect over SSH</h2>
+    <div id="loginHost" class="sub"></div>
+    <label class="field">
+      <span>Username</span>
+      <input id="username" type="text" value="pi" autocomplete="username">
+    </label>
+    <label class="field">
+      <span>Password</span>
+      <input id="password" type="password" autocomplete="current-password">
+    </label>
+    <label class="field" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <input id="remember" type="checkbox" style="width:auto; cursor:pointer;">
+      <span style="margin:0; font-weight:normal; font-size:13px;">Save password in this computer’s keychain</span>
+    </label>
+    <div id="loginError" class="error"></div>
+    <div class="actions">
+      <button class="btn" type="button" onclick="closeLoginModal()">Cancel</button>
+      <button id="connectButton" class="btn primary" type="submit">Connect</button>
+    </div>
+  </form>
+</div>
+
+<!-- Install ctrlPi API Modal -->
+<div id="ctrlpiBack" class="modalback">
+  <form id="ctrlpiForm" class="modal" onsubmit="submitCtrlPiInstall(event)">
+    <h2>Install ctrlPi API</h2>
+    <div id="ctrlpiHost" class="sub"></div>
+    <label class="field">
+      <span>Agent name</span>
+      <input id="ctrlpiName" type="text" autocomplete="off" spellcheck="false" required>
+    </label>
+    <label class="field">
+      <span>API key</span>
+      <input id="ctrlpiKey" type="text" autocomplete="off" spellcheck="false" required>
+    </label>
+    <div class="field">
+      <span>Package</span>
+      <div class="choice-row">
+        <label><input type="radio" name="ctrlpiPkg" value="lite" checked> Lite (recommended)</label>
+        <label><input type="radio" name="ctrlpiPkg" value="full"> Full (FastAPI /docs)</label>
+      </div>
+    </div>
+    <div id="ctrlpiHint" class="hint"></div>
+    <div id="ctrlpiError" class="error"></div>
+    <div class="actions">
+      <button class="btn" type="button" onclick="closeCtrlPiDialog()">Cancel</button>
+      <button class="btn primary" type="submit">Install</button>
+    </div>
+  </form>
+</div>
+
+<!-- Standard Dialog -->
+<dialog id="app-dialog">
+  <form id="dialog-form" method="dialog">
+    <h3 id="dialog-title"></h3>
+    <div id="dialog-message"></div>
+    <input id="dialog-input" type="text" autocomplete="off">
+    <div id="dialog-actions">
+      <span id="dialog-footer"></span>
+      <button id="dialog-cancel" class="btn" type="button" onclick="closeDialog(false)">Cancel</button>
+      <button id="dialog-confirm" class="btn primary" type="submit">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Toast & Tooltip -->
+<div id="toast"></div>
+<div id="hover-tooltip" role="tooltip"></div>
+
+<!-- Scripts -->
+<script src="/vendor/xterm.js"></script>
+<script>
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  let devices = [];
+  let chosen = null;
+  let token = '';
+  let home = '';
+  let allFiles = [];
+  let current = null;
+  let selectedDir = null; // the selected folder ('' is the home folder; its listing is on the right), or null
+  let term = null;
+  let socket = null;
+  let terminalToken = '';
+  let loadedDirs = new Set();
+  let expandedDirs = new Set();
+  let sessionCache = new Map();
+  let showHidden = false;
+
+  const fileIcon = '<svg class="ficon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.5H4.5A1.5 1.5 0 0 0 3 3v10a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 13 13V5.5Z"/><path d="M9 1.5v4h4"/></svg>';
+  const folderIcon = '<svg class="ficon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4A1.5 1.5 0 0 1 3 2.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5V12a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12Z"/></svg>';
+  const picoIcon = '<svg class="pico-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="8" height="8" rx="1.5"/><circle cx="6.25" cy="6.25" r=".6" fill="currentColor" stroke="none"/><path d="M6 12v2M10 12v2M4 6H2M4 10H2M14 6h-2M14 10h-2"/></svg>';
+
+  function busy(on) { $('#busy').classList.toggle('on', on); }
+  function toast(msg, type = '') {
+    const el = $('#toast');
+    el.textContent = msg;
+    el.className = 'show' + (type ? ' ' + type : '');
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.className = ''; }, 3000);
+  }
+
+  // ── Hover Tooltip ──
+  const hoverTooltipEl = $('#hover-tooltip');
+  let tooltipTarget = null;
+  function showHoverTooltip(target) {
+    const message = target.getAttribute('data-tooltip') || target.getAttribute('title');
+    if (!message) return;
+    if (target.hasAttribute('title')) {
+      target.setAttribute('data-tooltip', message);
+      target.removeAttribute('title');
+    }
+    tooltipTarget = target;
+    hoverTooltipEl.textContent = message;
+    hoverTooltipEl.style.display = 'block';
+    const targetRect = target.getBoundingClientRect();
+    const tipRect = hoverTooltipEl.getBoundingClientRect();
+    let left = targetRect.left + (targetRect.width - tipRect.width) / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+    let top = targetRect.bottom + 7;
+    if (top + tipRect.height > window.innerHeight - 8) top = targetRect.top - tipRect.height - 7;
+    hoverTooltipEl.style.left = Math.round(left) + 'px';
+    hoverTooltipEl.style.top = Math.max(8, Math.round(top)) + 'px';
+  }
+  function hideHoverTooltip() {
+    tooltipTarget = null;
+    if (hoverTooltipEl) hoverTooltipEl.style.display = 'none';
+  }
+  document.addEventListener('mouseover', e => {
+    const target = e.target.closest('[title], [data-tooltip]');
+    if (target && target !== tooltipTarget) showHoverTooltip(target);
+  });
+  document.addEventListener('mouseout', e => {
+    if (tooltipTarget && !tooltipTarget.contains(e.relatedTarget)) hideHoverTooltip();
+  });
+  document.addEventListener('focusin', e => {
+    const target = e.target.closest('[title], [data-tooltip]');
+    if (target) showHoverTooltip(target);
+  });
+  document.addEventListener('focusout', hideHoverTooltip);
+  window.addEventListener('scroll', hideHoverTooltip, true);
+
+  function toggleTheme() {
+    const isDark = document.documentElement.classList.toggle('dark-mode');
+    localStorage.setItem('ctrlpi-theme', isDark ? 'dark' : 'light');
+    if (term) {
+      term.options.theme = isDark
+        ? { background: '#0d1117', foreground: '#e6edf3', cursor: '#58a6ff', selectionBackground: '#1f6feb44' }
+        : { background: '#ffffff', foreground: '#1f2328', cursor: '#0969da', selectionBackground: '#b6e3ff' };
+    }
+  }
+
+  // ── Dialog System ──
+  let dialogResolver = null;
+  // messageHTML and footerHTML are for fixed markup written in this page only (the About box), never for data.
+  function showDialog({ title, message, messageHTML, footerHTML = '', input = false, inputValue = '', confirmText = 'OK', isDanger = false, cancel = true }) {
+    return new Promise(resolve => {
+      dialogResolver = resolve;
+      const dlg = $('#app-dialog');
+      $('#dialog-title').textContent = title || '';
+      if (messageHTML) $('#dialog-message').innerHTML = messageHTML;
+      else $('#dialog-message').textContent = message || '';
+      $('#dialog-cancel').style.display = cancel ? '' : 'none';
+      $('#dialog-footer').innerHTML = footerHTML;
+      const inputEl = $('#dialog-input');
+      if (input) {
+        inputEl.classList.add('visible');
+        inputEl.value = inputValue;
+      } else {
+        inputEl.classList.remove('visible');
+      }
+      const confirmBtn = $('#dialog-confirm');
+      confirmBtn.textContent = confirmText;
+      confirmBtn.classList.toggle('dialog-danger', isDanger);
+      dlg.showModal();
+      if (input) {
+        inputEl.focus();
+        inputEl.select();
+      } else {
+        confirmBtn.focus();
+      }
+    });
+  }
+  function closeDialog(confirmed) {
+    const dlg = $('#app-dialog');
+    dlg.close();
+    if (dialogResolver) {
+      const res = dialogResolver;
+      dialogResolver = null;
+      if (!confirmed) res(null);
+      else {
+        const inputEl = $('#dialog-input');
+        res(inputEl.classList.contains('visible') ? inputEl.value : true);
+      }
+    }
+  }
+  $('#dialog-form').onsubmit = e => {
+    e.preventDefault();
+    closeDialog(true);
+  };
+  function appAlert(title, message) { return showDialog({ title, message, confirmText: 'OK' }); }
+  function appConfirm(title, message, isDanger = false) { return showDialog({ title, message, confirmText: 'Confirm', isDanger }); }
+  function appPrompt(title, message, defaultValue = '') { return showDialog({ title, message, input: true, inputValue: defaultValue }); }
+
+  // ── API Helper ──
+  async function json(url, opt = {}) {
+    busy(true);
+    try {
+      opt.headers = { ...(opt.headers || {}), ...(token ? { 'X-Pi-Session': token } : {}) };
+      const r = await fetch(url, opt);
+      const d = await r.json();
+      if (!r.ok || d.error) throw new Error(d.error || 'Request failed');
+      return d;
+    } finally {
+      busy(false);
+    }
+  }
+
+  function shortAddress(host) {
+    const p = host.split('.');
+    return p.length === 4 ? '…' + p[3] : host;
+  }
+  function deviceLabel(d) {
+    return d.name && d.name !== '-' ? d.name : shortAddress(d.host);
+  }
+  function deviceType(d) {
+    if (d.ssh) {
+      if (d.pi) return 'Pi';
+      if (d.model && !/ESP32|Pico/i.test(d.model)) return 'Pi';
+      return 'Unverified';
+    }
+    if (d.model && /ESP32/i.test(d.model)) return 'ESP32';
+    if (d.name && /ESP32/i.test(d.name)) return 'ESP32';
+    if (d.ctrlpi) return 'Pico';
+    if (d.pi) return 'Pi';
+    return 'Unverified';
+  }
+  function cleanVersion(v) {
+    return String(v || '').replace(/^v(?=\d)/i, '');
+  }
+  function modelParts(model, fallback) {
+    if (!model) return { pill: fallback, suffix: '' };
+    const m = String(model).match(/^(.*?)(\s+(?:Rev|with)\b.*)$/i);
+    let pill = m ? m[1].trim() : String(model).trim();
+    let suffix = m ? m[2].trim() : '';
+    if (/\bESP32/i.test(pill) || /\bESP32/i.test(model)) {
+      pill = pill.replace(/^Generic\s+/i, '').replace(/\s+module$/i, '').trim();
+      pill = pill.replace(/^ESP32-?([A-Z]\d+)$/i, (_, variant) => `ESP32-${variant.toUpperCase()}`);
+      pill = pill.replace(/^esp32$/i, 'ESP32');
+      if (/^with\s+ESP32(?:[A-Z0-9_-]+)?$/i.test(suffix)) {
+        suffix = '';
+      }
+    }
+    return { pill, suffix };
+  }
+  function hardwareSpecs(d) {
+    if (!d) return { ram: null, flash: null, revision: null, package: null, frequency: null };
+    const model = String(d.model || '');
+    const type = deviceType(d);
+    let ram = d.ram || null;
+    let flash = d.flash || d.sd || null;
+    let revision = d.revision || null;
+    let pkg = d.package || null;
+    let frequency = d.frequency || null;
+
+    if (!revision) {
+      const revMatch = model.match(/\bRev\s+([0-9a-z.]+)/i);
+      if (revMatch) revision = 'Rev ' + revMatch[1];
+    }
+
+    if (type === 'Pico' || /Pico/i.test(model)) {
+      const isPico2 = /RP2350|Pico\s*2/i.test(model);
+      if (!ram) ram = isPico2 ? '520KB RAM' : '264KB RAM';
+      if (!flash) flash = isPico2 ? '4MB Flash' : '2MB Flash';
+      if (!frequency) frequency = isPico2 ? '150MHz' : '133MHz';
+      if (!pkg) pkg = isPico2 ? 'RP2350' : 'RP2040';
+    } else if (type === 'ESP32' || /ESP32/i.test(model)) {
+      if (/ESP32-?S3/i.test(model)) {
+        if (!ram) ram = '512KB RAM';
+        if (!flash) flash = '8MB Flash';
+        if (!frequency) frequency = '240MHz';
+        if (!pkg) pkg = 'Xtensa LX7';
+      } else if (/ESP32-?C3/i.test(model)) {
+        if (!ram) ram = '400KB RAM';
+        if (!flash) flash = '4MB Flash';
+        if (!frequency) frequency = '160MHz';
+        if (!pkg) pkg = 'RISC-V';
+      } else if (/ESP32-?S2/i.test(model)) {
+        if (!ram) ram = '320KB RAM';
+        if (!flash) flash = '4MB Flash';
+        if (!frequency) frequency = '240MHz';
+        if (!pkg) pkg = 'Xtensa LX7';
+      } else {
+        if (!ram) ram = '520KB RAM';
+        if (!flash) flash = '4MB Flash';
+        if (!frequency) frequency = '240MHz';
+        if (!pkg) pkg = 'Xtensa LX6';
+      }
+    } else if (type === 'Pi' || d.pi) {
+      if (!ram) {
+        if (/Zero\s*2\s*W/i.test(model)) ram = '512MB RAM';
+        else if (/Zero/i.test(model)) ram = '512MB RAM';
+        else if (/Model\s*A\b|1\s*A\b/i.test(model)) ram = '256MB RAM';
+        else if (/3\s*A\+/i.test(model)) ram = '512MB RAM';
+        else if (/3\s*B\b|3\s*B\+/i.test(model)) ram = '1GB RAM';
+        else if (/2\s*B\b/i.test(model)) ram = '1GB RAM';
+      }
+      if (!frequency) {
+        if (/Pi\s*5/i.test(model)) frequency = '2.4GHz';
+        else if (/Pi\s*4/i.test(model)) frequency = '1.5GHz';
+        else if (/3\s*B\+/i.test(model)) frequency = '1.4GHz';
+        else if (/3\s*B\b/i.test(model)) frequency = '1.2GHz';
+        else if (/Zero\s*2/i.test(model)) frequency = '1.0GHz';
+        else if (/Zero/i.test(model)) frequency = '1.0GHz';
+      }
+    }
+
+    if (ram && !/RAM/i.test(String(ram))) ram = String(ram).trim() + ' RAM';
+    if (flash && !/Flash|SD/i.test(String(flash))) flash = String(flash).trim() + (type === 'Pi' || d.pi ? ' SD' : ' Flash');
+    if (frequency && !/Hz$/i.test(String(frequency))) frequency = String(frequency).trim() + 'MHz';
+
+    return { ram, flash, revision, package: pkg, frequency };
+  }
+  function deviceDetails(d) {
+    const hw = hardwareSpecs(d);
+    return [
+      'Name: ' + deviceLabel(d),
+      'Device: ' + (d.model || deviceType(d)),
+      hw.ram ? 'RAM: ' + hw.ram : null,
+      hw.flash ? (deviceType(d) === 'Pi' || d.pi ? 'SD: ' : 'Flash: ') + hw.flash : null,
+      hw.revision ? 'Revision: ' + hw.revision : null,
+      hw.package ? 'Package: ' + hw.package : null,
+      hw.frequency ? 'Frequency: ' + hw.frequency : null,
+      d.os ? 'OS: ' + d.os : null,
+      'IP: ' + d.host + (d.ssh && d.port !== 22 ? ':' + d.port : ''),
+      'MAC: ' + (d.mac || 'not available'),
+      'SSH: ' + (d.ssh ? 'available' : 'no'),
+      'ctrlPi: ' + (d.ctrlpi ? 'running' : 'no'),
+      d.version ? 'Version: ' + cleanVersion(d.version) : null
+    ].filter(Boolean).join('\n');
+  }
+
+  // ── Render Devices & Pills ──
+  function renderDevices() {
+    const rows = $('#rows');
+    const cols = 6;
+    const refreshBtn = $('#refresh-btn');
+    if (!devices.length) {
+      rows.innerHTML = `<tr><td colspan="${cols}" class="empty">${refreshBtn?.classList.contains('refreshing') ? 'Scanning…' : 'No SSH or ctrlPi devices found'}</td></tr>`;
+      $('#pills').innerHTML = '<span class="no-board">no board connected</span>';
+      if (refreshBtn) $('#pills').appendChild(refreshBtn);
+      return;
+    }
+
+    rows.innerHTML = devices.map((d, i) => {
+      const type = deviceType(d);
+      const badge = type === 'Pi' ? 'pi' : type === 'Pico' ? 'pico' : type === 'ESP32' ? 'esp32' : '';
+      const parts = modelParts(d.model, type);
+      const hw = hardwareSpecs(d);
+      const chips = [
+        hw.ram ? `<span class="hw-chip">${esc(hw.ram)}</span>` : '',
+        hw.flash ? `<span class="hw-chip">${esc(hw.flash)}</span>` : '',
+        hw.revision ? `<span class="hw-chip">${esc(hw.revision)}</span>` : '',
+        hw.package ? `<span class="hw-chip">${esc(hw.package)}</span>` : '',
+        hw.frequency ? `<span class="hw-chip">${esc(hw.frequency)}</span>` : ''
+      ].filter(Boolean).join('');
+      return `<tr data-i="${i}" style="${d.ssh ? '' : 'cursor:default'}">
+        <td>${esc(d.name)}</td>
+        <td><span class="badge ${badge}">${esc(parts.pill)}</span>${chips ? ' <span class="hw-chips">' + chips + '</span>' : ''}</td>
+        <td>${esc(d.host)}</td>
+        <td>${esc(d.mac || '-')}</td>
+        <td>${d.ssh ? '<span class="ssh-ok" title="SSH available">✓</span>' : '<span class="ssh-no">-</span>'}</td>
+        <td>${d.ctrlpi ? (d.version ? `<span class="ctrl-version">${esc(cleanVersion(d.version))}</span>` : '<span class="ssh-ok" title="ctrlPi /hello answered">✓</span>') : '<span class="ssh-no">-</span>'}</td>
+      </tr>`;
+    }).join('');
+
+    const pis = devices.filter(d => deviceType(d) === 'Pi' && d.ssh);
+    if (!pis.length) {
+      $('#pills').innerHTML = '<span class="no-board">no Pis connected</span>';
+    } else {
+      $('#pills').innerHTML = pis.map(d => {
+        const isActive = chosen && chosen.host === d.host;
+        return `<button class="pill ${isActive ? 'active' : ''}" data-host="${esc(d.host)}" title="${esc(deviceDetails(d))}">
+          ${picoIcon}
+          <span>${esc(deviceLabel(d))}</span>
+        </button>`;
+      }).join('');
+    }
+    if (refreshBtn) $('#pills').appendChild(refreshBtn);
+  }
+
+  async function scan(force = false) {
+    exitReadme();
+    const refreshBtn = $('#refresh-btn');
+    const cardBtn = $('#card-refresh-btn');
+    if (refreshBtn.classList.contains('refreshing')) return;
+    refreshBtn.classList.add('refreshing');
+    cardBtn.classList.add('refreshing');
+    refreshBtn.disabled = cardBtn.disabled = true;
+    $('#scanText').textContent = 'Scanning the local network for SSH and ctrlPi devices…';
+    devices = [];
+    renderDevices();
+    busy(true);
+    try {
+      const response = await fetch('/api/devices/stream' + (force ? '?refresh=1' : ''));
+      if (!response.ok || !response.body) throw new Error('Scan request failed');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = pending.split('\n');
+        pending = lines.pop() || '';
+        for (const line of lines) {
+          if (!line) continue;
+          const msg = JSON.parse(line);
+          if (msg.error) throw new Error(msg.error);
+          if (msg.device) {
+            const i = devices.findIndex(d => d.host === msg.device.host);
+            if (i < 0) devices.push(msg.device);
+            else devices[i] = { ...devices[i], ...msg.device };
+            devices.sort((a, b) => deviceLabel(a).localeCompare(deviceLabel(b), undefined, { sensitivity: 'base', numeric: true }));
+            renderDevices();
+            $('#scanText').textContent = `Scanning… found ${devices.length} device${devices.length === 1 ? '' : 's'}`;
+          }
+          if (msg.done) {
+            $('#scanText').textContent = `Found ${devices.length} device${devices.length === 1 ? '' : 's'}; select one with SSH to connect.`;
+            if (msg.mcpEnabled !== undefined) setMcpEnabled(msg.mcpEnabled);
+          }
+        }
+        if (done) break;
+      }
+    } catch (e) {
+      $('#rows').innerHTML = `<tr><td colspan="6" class="empty">${esc(e.message)}</td></tr>`;
+      $('#scanText').textContent = 'Scan failed';
+    } finally {
+      refreshBtn.classList.remove('refreshing');
+      cardBtn.classList.remove('refreshing');
+      refreshBtn.disabled = cardBtn.disabled = false;
+      busy(false);
+      if (!devices.length && $('#scanText').textContent !== 'Scan failed') renderDevices();
+    }
+  }
+
+  // ── Device Connection & Sessions ──
+  function cacheKey(d) { return d.host; }
+  function openLogin(d, message = '') {
+    chosen = d;
+    $('#loginHost').textContent = `${d.name} · ${d.host}:${d.port}`;
+    $('#username').value = d.username || 'pi';
+    $('#password').value = '';
+    $('#remember').checked = !!d.saved;
+    $('#loginError').textContent = message;
+    $('#loginBack').classList.add('open');
+    setTimeout(() => $('#password').focus(), 50);
+  }
+  function closeLoginModal() {
+    $('#loginBack').classList.remove('open');
+  }
+
+  function askLogin(d) {
+    exitReadme();
+    const cached = sessionCache.get(cacheKey(d));
+    if (cached) {
+      activateDevice(d, cached, true).catch(() => {
+        sessionCache.delete(cacheKey(d));
+        token = '';
+        openLogin(d, 'The previous session expired. Please connect again.');
+      });
+      return;
+    }
+    openLogin(d);
+  }
+
+  async function activateDevice(device, session, validateSession = false) {
+    const wasTerminal = $('#termButton')?.classList.contains('tab-active') || $('#workspace')?.classList.contains('terminal-mode');
+    chosen = device;
+    if (session.model) {
+      device.model = session.model;
+    }
+    token = session.token;
+    home = session.home;
+    allFiles = [];
+    loadedDirs = new Set();
+    expandedDirs = new Set();
+    clearViewer();
+    if (socket) {
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.close();
+      socket = null;
+    }
+    terminalToken = '';
+    closeLoginModal();
+
+    $('#filesButton').style.display = '';
+    $('#termButton').style.display = '';
+    setMenuDeviceEnabled(true);
+
+    renderDevices();
+    if (wasTerminal) {
+      showTerminalTab();
+    } else {
+      showFilesTab();
+    }
+
+    try {
+      await loadFiles();
+      // A home folder with a single folder opens it and selects its first entry; otherwise the home folder is selected.
+      const dirs = allFiles.filter(f => f.isDir && !f.path.includes('/'));
+      if (dirs.length === 1) {
+        await selectFolder(dirs[0].path);
+        const first = visibleFiles().find(f => parentPath(f.path) === dirs[0].path);
+        if (first && first.isDir) await selectFolder(first.path, false, false);
+        else if (first) {
+          await openFile(first);
+          if (wasTerminal) showTerminalTab();
+        }
+      } else {
+        await selectFolder('');
+      }
+      toast(`Connected to ${deviceLabel(device)}`, 'good');
+    } catch (e) {
+      if (validateSession) throw e;
+      $('#files').innerHTML = `<div class="empty">Could not load files<br>${esc(e.message)}</div>`;
+    }
+  }
+
+  async function handleLoginSubmit(e) {
+    e.preventDefault();
+    const btn = $('#connectButton');
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    $('#loginError').textContent = '';
+    try {
+      const d = await json('/api/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: chosen.host,
+          port: chosen.port,
+          mac: chosen.mac,
+          username: $('#username').value,
+          password: $('#password').value,
+          savePassword: $('#remember').checked
+        })
+      });
+      sessionCache.set(cacheKey(chosen), d);
+      await activateDevice(chosen, d);
+      if (d.credentialWarning) console.warn(d.credentialWarning);
+    } catch (x) {
+      $('#loginError').textContent = x.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+    }
+  }
+
+  function setMenuDeviceEnabled(enabled) {
+    ['menu-upload', 'menu-upload-folder', 'menu-new-file', 'menu-new-folder', 'menu-zip', 'menu-restore', 'menu-disconnect', 'menu-usb-power', 'menu-reboot'].forEach(id => {
+      const el = $('#' + id);
+      if (el) el.disabled = !enabled;
+    });
+    const ctrlPiBtn = $('#menu-install-ctrlpi');
+    if (ctrlPiBtn) ctrlPiBtn.style.display = enabled ? 'block' : 'none';
+  }
+
+  // ── Tab Navigation ──
+  function exitReadme() {
+    const screen = $('#readme-screen');
+    if (!screen || screen.style.display === 'none') return;
+    screen.style.display = 'none';
+    updateTitle();
+  }
+
+  // The browser tab names the open file or the selected folder (the home folder by its own name).
+  function updateTitle() {
+    if ($('#readme-screen').style.display === 'block') return;
+    const p = current ? current.path : selectedDir;
+    document.title = p === null ? 'Pi Bay' : 'Pi Bay - ' + (p || home).split('/').pop();
+  }
+
+  function setActiveTab(id) {
+    ['showDevices', 'filesButton', 'termButton'].forEach(x => $('#' + x)?.classList.toggle('tab-active', x === id));
+  }
+  function showDevicesTab() {
+    exitReadme();
+    $('.view.active')?.classList.remove('active');
+    $('#discovery').classList.add('active');
+    setActiveTab('showDevices');
+  }
+  function showFilesTab() {
+    exitReadme();
+    $('.view.active')?.classList.remove('active');
+    $('#workspace').classList.add('active');
+    $('#workspace').classList.remove('terminal-mode');
+    setActiveTab('filesButton');
+  }
+  function showTerminalTab() {
+    exitReadme();
+    $('.view.active')?.classList.remove('active');
+    $('#workspace').classList.add('active');
+    $('#workspace').classList.add('terminal-mode');
+    setActiveTab('termButton');
+    openTerminal();
+  }
+
+  // ── File Management ──
+  const shq = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
+  const shFileArg = s => /^[a-zA-Z0-9_.-]+$/.test(s) ? s : shq(s);
+  const TOOLBAR_BUTTONS = ['run', 'format-json', 'movewrap', 'download', 'edit', 'save', 'cancel', 'rename', 'remove'];
+  const RUNNERS = { py: 'python3', sh: './', bash: './', js: 'node' };
+  const ROW_ICONS = {
+    del: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4"/><path d="M3.75 4l.7 9a1.5 1.5 0 0 0 1.5 1.5h4.1a1.5 1.5 0 0 0 1.5-1.5l.7-9"/><path d="M6.5 7v4.5M9.5 7v4.5"/></svg>'
+  };
+
+  function emptyViewerHTML() {
+    return `<div class="placeholder">
+        <svg width="42" height="42" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 1.5H4.5A1.5 1.5 0 0 0 3 3v10a1.5 1.5 0 0 0 1.5 1.5h7A1.5 1.5 0 0 0 13 13V5.5Z"/><path d="M9 1.5v4h4"/></svg>
+        <span>Select a file from the home directory</span>
+        <div class="welcome-content">
+          <p><strong class="welcome-heading">Your next project starts here.</strong></p>
+          <p>Drop files or folders onto the list to upload them, drag a file onto a folder to move it,<br>or open the Terminal tab for a shell on the Pi.</p>
+          <button class="btn primary" onclick="showReadme()">Getting started</button>
+        </div>
+      </div><textarea id="editor" spellcheck="false"></textarea>`;
+  }
+
+  function clearViewer() {
+    current = null;
+    selectedDir = null;
+    updateTitle();
+    $('#content').innerHTML = emptyViewerHTML();
+    TOOLBAR_BUTTONS.forEach(x => $('#' + x).style.display = 'none');
+    $('#filename').textContent = '';
+    $('#dirty').style.display = 'none';
+    closeMoveMenu();
+  }
+
+  async function loadFiles(path = '') {
+    const d = await json('/api/files?path=' + encodeURIComponent(path) + (showHidden ? '&showHidden=1' : ''));
+    allFiles = allFiles.filter(f => parentPath(f.path) !== path).concat(d.files);
+    loadedDirs.add(path);
+    renderFiles();
+  }
+
+  // Reload the given folders (and the root) so the tree reflects a change; unloaded folders are skipped.
+  async function refreshDirs(dirs) {
+    const list = [...new Set([''].concat(dirs))].filter(d => d === '' || loadedDirs.has(d)).sort((a, b) => a.length - b.length);
+    for (const d of list) {
+      try { await loadFiles(d); } catch (e) { toast('Could not refresh ' + (d || home) + ': ' + e.message, 'bad'); }
+    }
+  }
+
+  function parentPath(p) {
+    const i = p.lastIndexOf('/');
+    return i < 0 ? '' : p.slice(0, i);
+  }
+
+  function formatSize(bytes) {
+    if (bytes === undefined || bytes === null) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function visibleFiles() {
+    const out = [];
+    function add(parent, depth) {
+      allFiles.filter(f => parentPath(f.path) === parent)
+        .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name))
+        .forEach(f => {
+          out.push({ ...f, depth });
+          if (f.isDir && expandedDirs.has(f.path)) add(f.path, depth + 1);
+        });
+    }
+    add('', 0);
+    return out;
+  }
+
+  function renderFiles() {
+    const q = $('#filter').value.toLowerCase();
+    const rows = q ? allFiles.filter(f => f.path.toLowerCase().includes(q)).map(f => ({ ...f, depth: f.path.split('/').length - 1 })) : visibleFiles();
+    $('#files').innerHTML = rows.map(f => {
+      const isSel = current ? current.path === f.path : selectedDir === f.path;
+      const isExpanded = expandedDirs.has(f.path);
+      const twist = f.isDir ? `<span class="twist">${isExpanded ? '▼' : '▶'}</span>` : `<span class="twist"></span>`;
+      return `<div class="file ${f.isDir ? 'dir' : ''} ${isSel ? 'sel' : ''}" data-path="${esc(f.path)}" data-dir="${f.isDir ? '1' : ''}" draggable="true" style="padding-left: ${10 + f.depth * 14}px">
+        ${twist}
+        ${f.isDir ? folderIcon : fileIcon}
+        <span class="fname">${esc(f.name || f.path.split('/').pop())}</span>
+        <span class="fmeta">${f.isDir ? '' : formatSize(f.size)}</span>
+        <span class="acts"><button class="del" data-act="delete" title="Delete ${f.isDir ? 'folder' : 'file'}">${ROW_ICONS.del}</button></span>
+      </div>`;
+    }).join('') + (token && !q ? `<div id="upload-hint">Drop files or folders here to upload them to ${esc(home)}</div>` : '');
+    if (selectedDir !== null && !current) renderFolderView();
+  }
+
+  // The folder that new files, new folders and uploads go into: the selected folder, else the open file's folder.
+  function targetDir() {
+    return selectedDir !== null ? selectedDir : current ? parentPath(current.path) : '';
+  }
+
+  // Select a folder: its files on the right, rename and delete in the toolbar (not for the home folder).
+  // toggle collapses an expanded folder; expand = false lists it without expanding it in the tree.
+  async function selectFolder(p, toggle = false, expand = true) {
+    closeMoveMenu();
+    current = null;
+    selectedDir = p;
+    TOOLBAR_BUTTONS.forEach(x => $('#' + x).style.display = p && (x === 'rename' || x === 'remove') ? '' : 'none');
+    $('#dirty').style.display = 'none';
+    if (toggle && expandedDirs.has(p)) {
+      expandedDirs.delete(p);
+    } else {
+      expandTo(expand ? p : parentPath(p));
+      if (!loadedDirs.has(p)) {
+        $('#content').innerHTML = '<div class="placeholder">Loading folder…</div><textarea id="editor" spellcheck="false"></textarea>';
+        try { await loadFiles(p); } catch (e) { toast('Could not open folder: ' + e.message, 'bad'); }
+      }
+    }
+    renderFiles();
+  }
+
+  function formatDate(mtime) {
+    return mtime ? new Date(mtime * 1000).toLocaleString() : '';
+  }
+
+  function renderFolderView() {
+    $('#filename').textContent = home + (selectedDir ? '/' + selectedDir : '');
+    updateTitle();
+    const rows = allFiles.filter(f => parentPath(f.path) === selectedDir)
+      .sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+    $('#content').innerHTML = (rows.length
+      ? `<table id="dirlist"><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>` +
+        rows.map(f => `<tr class="${f.isDir ? 'dir' : ''}" data-path="${esc(f.path)}" data-dir="${f.isDir ? '1' : ''}">
+          <td><span class="dname">${f.isDir ? folderIcon : fileIcon}<span>${esc(f.name)}</span></span></td>
+          <td class="dmeta">${f.isDir ? '' : formatSize(f.size)}</td>
+          <td class="dmeta">${formatDate(f.mtime)}</td>
+        </tr>`).join('') + '</tbody></table>'
+      : '<div class="placeholder">Empty folder</div>') + '<textarea id="editor" spellcheck="false"></textarea>';
+  }
+
+  $('#content').addEventListener('click', e => {
+    const row = e.target.closest('#dirlist tr[data-path]');
+    if (!row) return;
+    const f = allFiles.find(x => x.path === row.dataset.path);
+    if (!f) return;
+    if (f.isDir) selectFolder(f.path);
+    else openFile(f);
+  });
+
+  $('#filter').oninput = renderFiles;
+
+  $('#files').onclick = async e => {
+    const el = e.target.closest('[data-path]');
+    if (!el) return;
+    const act = e.target.closest('[data-act]');
+    const p = el.dataset.path;
+    const isDir = el.dataset.dir === '1';
+    if (act) {
+      e.stopPropagation();
+      if (act.dataset.act === 'delete') deletePath(p, isDir);
+      return;
+    }
+    const f = allFiles.find(x => x.path === p);
+    if (!f) return;
+    if (f.isDir) {
+      await selectFolder(f.path, true);
+    } else {
+      openFile(f);
+    }
+  };
+
+  function runnerFor(p) {
+    const m = /\.([a-z]+)$/i.exec(p || '');
+    return m ? RUNNERS[m[1].toLowerCase()] || null : null;
+  }
+
+  async function openFile(f) {
+    showFilesTab();
+    closeMoveMenu();
+    selectedDir = null;
+    $('#filename').textContent = home + '/' + f.path;
+    $('#dirty').style.display = 'none';
+    $('#content').innerHTML = '<div class="placeholder">Loading file…</div><textarea id="editor" spellcheck="false"></textarea>';
+    try {
+      const d = await json('/api/file?path=' + encodeURIComponent(f.path));
+      current = { ...f, ...d };
+      updateTitle();
+      ['download', 'rename', 'remove', 'movewrap'].forEach(x => $('#' + x).style.display = '');
+      $('#edit').style.display = d.binary ? 'none' : '';
+      $('#run').style.display = !d.binary && runnerFor(f.path) ? '' : 'none';
+      $('#save').style.display = $('#cancel').style.display = $('#format-json').style.display = 'none';
+      if (d.binary) {
+        $('#content').innerHTML = `<div class="placeholder">Binary file · ${formatSize(d.size)}</div><textarea id="editor" spellcheck="false"></textarea>`;
+      } else if (/\.md$/i.test(f.path)) {
+        $('#content').innerHTML = `<div id="md" style="display:block">${renderMarkdown(d.text || '')}</div><textarea id="editor" spellcheck="false"></textarea>`;
+      } else {
+        $('#content').innerHTML = `<pre>${esc(d.text || '')}</pre><textarea id="editor" spellcheck="false"></textarea>`;
+      }
+      renderFiles();
+    } catch (e) {
+      $('#content').innerHTML = `<div class="placeholder" style="color:#cf222e">Could not open file: ${esc(e.message)}</div><textarea id="editor" spellcheck="false"></textarea>`;
+    }
+  }
+
+  function startEdit() {
+    closeMoveMenu();
+    $('#content').innerHTML = `<textarea id="editor" spellcheck="false"></textarea>`;
+    const e = $('#editor');
+    e.style.display = 'block';
+    e.value = current.text || '';
+    e.focus();
+    // Only Format JSON (for .json), Cancel and Save while editing.
+    ['edit', 'run', 'movewrap', 'download', 'rename', 'remove'].forEach(x => $('#' + x).style.display = 'none');
+    $('#save').style.display = $('#cancel').style.display = '';
+    $('#format-json').style.display = /\.json$/i.test(current.path) ? '' : 'none';
+    $('#dirty').style.display = '';
+  }
+
+  function cancelEdit() {
+    $('#dirty').style.display = 'none';
+    openFile(current);
+  }
+
+  function formatJSON() {
+    const editor = $('#editor');
+    if (!current || !editor || !/\.json$/i.test(current.path)) return;
+    try {
+      editor.value = JSON.stringify(JSON.parse(editor.value), null, 3) + '\n';
+      toast('JSON formatted with 3-space indentation', 'good');
+    } catch (e) {
+      toast('Invalid JSON: ' + e.message, 'bad');
+    }
+  }
+
+  async function saveEdit() {
+    const text = $('#editor').value;
+    busy(true);
+    try {
+      await json('/api/file?path=' + encodeURIComponent(current.path), { method: 'PUT', body: text });
+      current.text = text;
+      toast('File saved', 'good');
+      await openFile(current);
+      await loadFiles(parentPath(current.path));
+    } catch (e) {
+      toast('Save failed: ' + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  function runCurrentFile() {
+    const runner = current && runnerFor(current.path);
+    if (!runner) return;
+    const dir = parentPath(current.path);
+    const fileName = current.path.split('/').pop();
+    const cmd = runner === './' ? `./${shFileArg(fileName)}` : `${runner} ${shFileArg(fileName)}`;
+    sendToTerminal(`cd ${shq(dir ? home + '/' + dir : home)} && ${cmd}\n`);
+  }
+
+  function downloadPath(p) {
+    location.href = '/api/file?download=1&session=' + encodeURIComponent(token) + '&path=' + encodeURIComponent(p);
+  }
+  function downloadCurrentFile() {
+    if (current) downloadPath(current.path);
+  }
+
+  // Rename or move a file or folder, then fix up the cached tree and the open file.
+  async function movePathTo(from, to, isDir) {
+    to = to.replace(/^\/+|\/+$/g, '');
+    if (!to || to === from) return false;
+    if (isDir && to.startsWith(from + '/')) { toast('A folder cannot be moved into itself', 'bad'); return false; }
+    if (allFiles.some(f => f.path === to)) { toast(`"${to}" already exists`, 'bad'); return false; }
+    busy(true);
+    try {
+      await json('/api/rename?path=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to), { method: 'POST' });
+    } catch (e) {
+      busy(false);
+      toast('Move failed: ' + e.message, 'bad');
+      return false;
+    }
+    const under = x => x === from || x.startsWith(from + '/');
+    const openPath = current && under(current.path) ? to + current.path.slice(from.length) : null;
+    if (selectedDir && under(selectedDir)) selectedDir = to + selectedDir.slice(from.length);
+    const wasExpanded = expandedDirs.has(from);
+    allFiles = allFiles.filter(f => !under(f.path));
+    [...loadedDirs].filter(under).forEach(d => loadedDirs.delete(d));
+    [...expandedDirs].filter(under).forEach(d => expandedDirs.delete(d));
+    if (wasExpanded) { expandedDirs.add(to); loadedDirs.add(to); }
+    await refreshDirs([parentPath(from), parentPath(to), wasExpanded ? to : '']);
+    if (selectedDir && !current && !loadedDirs.has(selectedDir)) await loadFiles(selectedDir);
+    busy(false);
+    toast(parentPath(from) === parentPath(to) ? 'Renamed' : `Moved to ${parentPath(to) || home}`, 'good');
+    if (openPath) await openFile({ path: openPath, name: openPath.split('/').pop() });
+    return true;
+  }
+
+  async function renamePath(p, isDir) {
+    const to = await appPrompt(isDir ? 'Rename folder' : 'Rename file', 'New path relative to ' + home + ':', p);
+    if (to) await movePathTo(p, to, isDir);
+  }
+  function renameCurrentFile() {
+    if (current) renamePath(current.path, false);
+    else if (selectedDir) renamePath(selectedDir, true);
+  }
+
+  function toggleMoveMenu(e) {
+    e.stopPropagation();
+    const menu = $('#move-menu');
+    if (menu.classList.contains('open') || !current) return closeMoveMenu();
+    const here = parentPath(current.path);
+    const dirs = [''].concat(allFiles.filter(f => f.isDir).map(f => f.path).sort()).filter(d => d !== here);
+    menu.innerHTML = dirs.length
+      ? dirs.map(d => `<button data-dir="${esc(d)}">${esc(d ? d + '/' : home + '/')}</button>`).join('')
+      : '<div class="move-empty">No other folders loaded</div>';
+    menu.classList.add('open');
+  }
+  function closeMoveMenu() {
+    $('#move-menu').classList.remove('open');
+  }
+  $('#move-menu').onclick = async e => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-dir]');
+    if (!b || !current) return;
+    closeMoveMenu();
+    const base = current.path.split('/').pop();
+    await movePathTo(current.path, b.dataset.dir ? b.dataset.dir + '/' + base : base, false);
+  };
+  document.addEventListener('click', closeMoveMenu);
+
+  async function deletePath(p, isDir = false) {
+    const ok = await appConfirm(`Delete ${isDir ? 'folder' : 'file'}?`, `Are you sure you want to delete "${p}"?`, true);
+    if (!ok) return;
+    // Deleting the open file selects the folder it was in.
+    const reselect = !isDir && current && current.path === p ? parentPath(p) : null;
+    busy(true);
+    try {
+      await json('/api/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
+      toast('Deleted', 'good');
+      const under = x => x === p || x.startsWith(p + '/');
+      if ((current && under(current.path)) || (selectedDir && under(selectedDir))) clearViewer();
+      allFiles = allFiles.filter(f => !under(f.path));
+      [...loadedDirs].filter(under).forEach(d => loadedDirs.delete(d));
+      [...expandedDirs].filter(under).forEach(d => expandedDirs.delete(d));
+      await loadFiles(parentPath(p));
+      if (reselect !== null) await selectFolder(reselect);
+    } catch (e) {
+      toast('Delete failed: ' + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+  function deleteCurrentFile() {
+    if (current) deletePath(current.path, false);
+    else if (selectedDir) deletePath(selectedDir, true);
+  }
+
+  function expandTo(dir) {
+    for (let d = dir; d; d = parentPath(d)) expandedDirs.add(d);
+  }
+
+  async function newFile(parent = targetDir()) {
+    closeMenu();
+    if (!token) return;
+    const p = await appPrompt('New file', 'New file path relative to ' + home + ':', parent ? parent + '/untitled.txt' : 'untitled.txt');
+    if (!p) return;
+    busy(true);
+    try {
+      await json('/api/touch?path=' + encodeURIComponent(p), { method: 'POST' });
+      toast('File created', 'good');
+      expandTo(parentPath(p));
+      await loadFiles(parentPath(p));
+    } catch (e) {
+      toast('Create failed: ' + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  async function newFolder(parent = targetDir()) {
+    closeMenu();
+    if (!token) return;
+    const p = await appPrompt('New folder', 'New folder path relative to ' + home + ':', parent ? parent + '/new-folder' : 'new-folder');
+    if (!p) return;
+    busy(true);
+    try {
+      await json('/api/mkdir?path=' + encodeURIComponent(p), { method: 'POST' });
+      toast('Folder created', 'good');
+      expandTo(parentPath(p));
+      await loadFiles(parentPath(p));
+    } catch (e) {
+      toast('Create folder failed: ' + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  // ── Overflow "..." Menu Actions ──
+  function toggleMenu(e) {
+    e.stopPropagation();
+    $('#menu').classList.toggle('open');
+  }
+  function closeMenu() {
+    $('#menu').classList.remove('open');
+  }
+  document.addEventListener('click', closeMenu);
+  $('#menu').onclick = e => e.stopPropagation();
+
+  // ── Upload & Drag/Drop ──
+  function pickUpload() {
+    closeMenu();
+    $('#uploadInput').click();
+  }
+  function pickUploadFolder() {
+    closeMenu();
+    $('#uploadFolderInput').click();
+  }
+
+  // Upload [{ file, rel }] into dir (relative to home); the server creates any missing folders.
+  async function uploadEntries(list, dir = '') {
+    if (!token || !list.length) return;
+    const target = rel => dir ? dir + '/' + rel : rel;
+    const clashes = list.filter(x => allFiles.some(f => !f.isDir && f.path === target(x.rel)));
+    if (clashes.length && !await appConfirm('Overwrite files?', clashes.length === 1
+      ? `"${target(clashes[0].rel)}" already exists.`
+      : `${clashes.length} files already exist, for example "${target(clashes[0].rel)}".`, true)) return;
+    let done = 0;
+    busy(true);
+    try {
+      for (const x of list) {
+        await json('/api/file?path=' + encodeURIComponent(target(x.rel)), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: x.file
+        });
+        done++;
+      }
+      toast(`Uploaded ${done} file${done === 1 ? '' : 's'}${dir ? ' to ' + dir : ''}`, 'good');
+    } catch (err) {
+      toast(`Upload failed after ${done} of ${list.length} file${list.length === 1 ? '' : 's'}: ${err.message}`, 'bad');
+    } finally {
+      expandTo(dir);
+      const dirs = [];
+      for (let d = dir; d; d = parentPath(d)) { dirs.push(d); loadedDirs.add(d); }
+      loadedDirs.forEach(d => { if (!dir || d.startsWith(dir + '/')) dirs.push(d); });
+      await refreshDirs(dirs);
+      busy(false);
+    }
+  }
+
+  function handleFilesUpload(e) {
+    uploadEntries(Array.from(e.target.files || []).map(file => ({ file, rel: file.name })), targetDir());
+    e.target.value = '';
+  }
+  function handleFolderUpload(e) {
+    uploadEntries(Array.from(e.target.files || []).map(file => ({ file, rel: file.webkitRelativePath || file.name })), targetDir());
+    e.target.value = '';
+  }
+
+  function isFileDrag(e) {
+    return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  }
+
+  // Dropping on a folder targets that folder, on a file targets the file's folder, elsewhere the home folder.
+  function dropTargetDir(e) {
+    const row = e.target.closest('.file');
+    if (!row) return '';
+    return row.dataset.dir === '1' ? row.dataset.path : parentPath(row.dataset.path);
+  }
+  function clearDropHighlight() {
+    $('#files').classList.remove('dropping');
+    document.querySelectorAll('#files .drop-target').forEach(el => el.classList.remove('drop-target'));
+  }
+  function highlightDrop(dir) {
+    clearDropHighlight();
+    const row = dir && [...document.querySelectorAll('#files .file.dir')].find(r => r.dataset.path === dir);
+    if (row) row.classList.add('drop-target');
+    else $('#files').classList.add('dropping');
+  }
+
+  // Collect dropped files, walking dropped folders so their structure is kept.
+  async function droppedEntries(dt) {
+    const roots = Array.from(dt.items || []).filter(i => i.kind === 'file').map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (!roots.length) return Array.from(dt.files || []).map(file => ({ file, rel: file.name }));
+    const out = [];
+    async function walk(entry, prefix) {
+      if (entry.isFile) {
+        out.push({ file: await new Promise((resolve, reject) => entry.file(resolve, reject)), rel: prefix + entry.name });
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        let batch;
+        do {
+          batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+          for (const child of batch) await walk(child, prefix + entry.name + '/');
+        } while (batch.length);
+      }
+    }
+    for (const entry of roots) await walk(entry, '');
+    return out;
+  }
+
+  let draggedPath = null;
+  let draggedIsDir = false;
+  const filesEl = $('#files');
+  filesEl.addEventListener('dragstart', e => {
+    const row = e.target.closest('.file');
+    if (!row || !token) return;
+    draggedPath = row.dataset.path;
+    draggedIsDir = row.dataset.dir === '1';
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.setData('text/plain', draggedPath);
+    if (!draggedIsDir) {
+      // Dragging a file out of the window downloads it (Chromium browsers).
+      const name = draggedPath.split('/').pop().replace(/[\r\n:]/g, '_');
+      const url = new URL('/api/file?download=1&session=' + encodeURIComponent(token) + '&path=' + encodeURIComponent(draggedPath), location.href).href;
+      e.dataTransfer.setData('DownloadURL', 'application/octet-stream:' + name + ':' + url);
+    }
+  });
+  filesEl.addEventListener('dragend', () => {
+    document.querySelectorAll('#files .dragging').forEach(el => el.classList.remove('dragging'));
+    draggedPath = null;
+    clearDropHighlight();
+  });
+  ['dragenter', 'dragover'].forEach(ev => filesEl.addEventListener(ev, e => {
+    if (!token || (!draggedPath && !isFileDrag(e))) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = draggedPath ? 'move' : 'copy';
+    highlightDrop(dropTargetDir(e));
+  }));
+  filesEl.addEventListener('dragleave', e => {
+    if (!filesEl.contains(e.relatedTarget)) clearDropHighlight();
+  });
+  filesEl.addEventListener('drop', async e => {
+    if (!token) return;
+    e.preventDefault();
+    clearDropHighlight();
+    const dir = dropTargetDir(e);
+    if (draggedPath) {
+      const from = draggedPath;
+      const isDir = draggedIsDir;
+      draggedPath = null;
+      const base = from.split('/').pop();
+      await movePathTo(from, dir ? dir + '/' + base : base, isDir);
+      return;
+    }
+    if (isFileDrag(e)) uploadEntries(await droppedEntries(e.dataTransfer), dir);
+  });
+  // Files dropped on the right side: on the selected folder's listing they upload into that folder,
+  // on an open text file the first one replaces its content in the editor (saved only with Save).
+  const contentEl = $('#content');
+  const folderDrop = () => selectedDir !== null && !current;
+  const fileDrop = () => current && !current.binary;
+  const contentDrop = e => token && !draggedPath && isFileDrag(e) && (folderDrop() || fileDrop());
+  ['dragenter', 'dragover'].forEach(ev => contentEl.addEventListener(ev, e => {
+    if (!contentDrop(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    contentEl.classList.add('dropping');
+  }));
+  contentEl.addEventListener('dragleave', e => {
+    if (!contentEl.contains(e.relatedTarget)) contentEl.classList.remove('dropping');
+  });
+  contentEl.addEventListener('drop', async e => {
+    contentEl.classList.remove('dropping');
+    if (!contentDrop(e)) return;
+    e.preventDefault();
+    if (folderDrop()) uploadEntries(await droppedEntries(e.dataTransfer), selectedDir);
+    else replaceWithDroppedFile(e.dataTransfer.files[0]);
+  });
+  async function replaceWithDroppedFile(file) {
+    let text;
+    try { text = await file.text(); } catch { return toast('Could not read the dropped file', 'bad'); }
+    if (text.includes('\0')) return toast(`"${file.name}" is a binary file`, 'bad');
+    if ($('#editor').style.display !== 'block') startEdit();
+    $('#editor').value = text;
+    toast(`Replaced with ${file.name}, save to keep it`, 'good');
+  }
+  // Double-clicking an open text file starts editing it.
+  contentEl.addEventListener('dblclick', () => {
+    if (current && !current.binary && $('#editor').style.display !== 'block') startEdit();
+  });
+  // Files dropped anywhere else are ignored instead of opening in the browser.
+  ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+    if (isFileDrag(e) && !filesEl.contains(e.target)) e.preventDefault();
+  }));
+
+  function pickRestore() {
+    closeMenu();
+    if (!token) return;
+    $('#restoreInput').value = '';
+    $('#restoreInput').click();
+  }
+  async function handleRestore(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file || !token) return;
+    if (!await appConfirm(`Restore "${file.name}"?`, `Its files are extracted into ${home}. Files with the same path are overwritten.`, true)) return;
+    busy(true);
+    try {
+      const d = await json('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
+      toast(`Restored ${d.restored} file${d.restored === 1 ? '' : 's'}`, 'good');
+      await refreshDirs([...loadedDirs]);
+    } catch (err) {
+      toast('Restore failed: ' + err.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  function downloadZip() {
+    closeMenu();
+    if (!token) return;
+    location.href = '/api/zip?session=' + encodeURIComponent(token);
+  }
+
+  function toggleHiddenFiles() {
+    closeMenu();
+    showHidden = !showHidden;
+    $('#menu-hidden-files').classList.toggle('active', showHidden);
+    if (token) loadFiles();
+  }
+
+  let mcpEnabled = false;
+
+  function setMcpEnabled(enabled) {
+    mcpEnabled = !!enabled;
+    const btn = $('#mcp-toggle');
+    if (btn) {
+      btn.classList.toggle('showing', !mcpEnabled);
+      btn.setAttribute('aria-pressed', String(mcpEnabled));
+    }
+  }
+
+  async function toggleMcp() {
+    const enabled = !mcpEnabled;
+    setMcpEnabled(enabled);
+    toast(enabled ? 'Enabling MCP' : 'Disabling MCP', enabled ? 'good' : '');
+    const btn = $('#mcp-toggle');
+    if (btn) btn.disabled = true;
+    try {
+      const data = await json('/api/mcp?enabled=' + (enabled ? '1' : '0'), { method: 'POST' });
+      setMcpEnabled(data.enabled);
+    } catch (e) {
+      setMcpEnabled(!enabled);
+      toast('Could not change MCP: ' + e.message, 'bad');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // Type a command into the Terminal tab, opening the SSH shell first if needed.
+  function sendToTerminal(cmd) {
+    showTerminalTab();
+    function send() {
+      if (socket && socket.readyState === 1) socket.send(JSON.stringify({ type: 'data', data: cmd }));
+    }
+    if (socket && socket.readyState === 1 && terminalToken === token) {
+      setTimeout(send, 150);
+    } else {
+      const checkInterval = setInterval(() => {
+        if (socket && socket.readyState === 1) {
+          clearInterval(checkInterval);
+          setTimeout(send, 350);
+        }
+      }, 100);
+      setTimeout(() => clearInterval(checkInterval), 5000);
+    }
+  }
+
+  // ── Install ctrlPi API ──
+  // pi-gpio-api's install.sh asks for an agent name and API key only when ~/pi-gpio-api/config.json
+  // is missing, so the popup writes that file first (over SFTP) and passes --lite/--full itself.
+  let ctrlPiHasConfig = false;
+  async function installCtrlPi() {
+    closeMenu();
+    if (!token) return;
+    ctrlPiHasConfig = false;
+    try {
+      const d = await json('/api/files?path=pi-gpio-api&showHidden=1');
+      ctrlPiHasConfig = d.files.some(f => f.name === 'config.json' && !f.isDir);
+    } catch {}
+    $('#ctrlpiHost').textContent = `${deviceLabel(chosen)} · ${chosen.host}`;
+    $('#ctrlpiName').value = chosen.name && chosen.name !== '-' ? chosen.name.split('.')[0] : '';
+    $('#ctrlpiKey').value = '';
+    $('#ctrlpiName').disabled = $('#ctrlpiKey').disabled = ctrlPiHasConfig;
+    $('#ctrlpiHint').textContent = ctrlPiHasConfig
+      ? 'This Pi already has ~/pi-gpio-api/config.json, so its agent name and API key are kept. The installer updates pi-gpio-api in place and runs in the Terminal tab.'
+      : 'Installs pi-gpio-api into ~/pi-gpio-api. The installer runs in the Terminal tab so you can follow it.';
+    $('#ctrlpiError').textContent = '';
+    $('#ctrlpiBack').classList.add('open');
+    (ctrlPiHasConfig ? $('#ctrlpiForm button[type=submit]') : $('#ctrlpiName')).focus();
+  }
+  function closeCtrlPiDialog() {
+    $('#ctrlpiBack').classList.remove('open');
+  }
+  async function submitCtrlPiInstall(e) {
+    e.preventDefault();
+    const pkg = document.querySelector('input[name="ctrlpiPkg"]:checked').value === 'full' ? 'full' : 'lite';
+    if (!ctrlPiHasConfig) {
+      const name = $('#ctrlpiName').value.trim();
+      const key = $('#ctrlpiKey').value.trim();
+      if (!name || !key) { $('#ctrlpiError').textContent = 'Agent name and API key are required.'; return; }
+      if (/[\x00-\x1f\x7f]/.test(name + key)) { $('#ctrlpiError').textContent = 'Agent name and API key cannot contain control characters.'; return; }
+      try {
+        await json('/api/file?path=' + encodeURIComponent('pi-gpio-api/config.json'), {
+          method: 'PUT',
+          body: JSON.stringify({ api_key: key, name }, null, 2) + '\n'
+        });
+      } catch (err) {
+        $('#ctrlpiError').textContent = 'Could not write ~/pi-gpio-api/config.json: ' + err.message;
+        return;
+      }
+      refreshDirs([]);
+    }
+    closeCtrlPiDialog();
+    sendToTerminal(`cd ~ && curl -fsSL https://raw.githubusercontent.com/ctrlpi/pi-gpio-api/main/install.sh | bash -s -- --${pkg}\n`);
+  }
+
+  async function disconnectDevice() {
+    closeMenu();
+    if (!token) return;
+    const ok = await appConfirm('Disconnect', 'Are you sure you want to disconnect from this device?', false);
+    if (!ok) return;
+    busy(true);
+    try {
+      await json('/api/disconnect', { method: 'POST' });
+    } catch {}
+    token = '';
+    chosen = null;
+    clearViewer();
+    if (socket) { socket.close(); socket = null; }
+    $('#filesButton').style.display = 'none';
+    $('#termButton').style.display = 'none';
+    setMenuDeviceEnabled(false);
+    renderDevices();
+    showDevicesTab();
+    toast('Disconnected', 'good');
+    busy(false);
+  }
+
+  // Toggle Pi USB Power: types a uhubctl power cycle (every switchable hub off, 3 s, back on) into the
+  // Terminal tab, where sudo can ask for its password. uhubctl is installed first when it is missing.
+  const USB_POWER_CYCLE = 'hubs=$(sudo uhubctl | sed -n "s/^Current status for hub \\([^ ]*\\) .*/\\1/p" | sort -u); ' +
+    '[ -n "$hubs" ] || { echo "No USB hub with power switching found"; exit 1; }; ' +
+    'for h in $(echo "$hubs" | sort -r); do sudo uhubctl -l "$h" -a off >/dev/null; done; sleep 3; ' +
+    'for h in $hubs; do sudo uhubctl -l "$h" -a on >/dev/null; done; echo "USB power toggled"';
+  async function togglePiUsbPower() {
+    closeMenu();
+    if (!token) return;
+    let check;
+    try { check = await json('/api/usb-power'); } catch (err) { return toast('Could not check USB power: ' + err.message, 'bad'); }
+    if (check.usbRoot) return appAlert('Toggle Pi USB Power', 'This Pi boots from a USB drive, so turning its USB power off would crash it.');
+    const ok = await showDialog({
+      title: 'Toggle Pi USB Power',
+      message: 'Turns the power to every USB port on this Pi off, and back on after 3 seconds. USB devices disconnect and reconnect.' +
+        (check.uhubctl ? '' : '\n\nuhubctl is not installed on this Pi, so it is installed first (sudo apt install uhubctl).') +
+        '\n\nThe commands run in the Terminal tab, where sudo may ask for your password.',
+      confirmText: 'Run in Terminal',
+      isDanger: true
+    });
+    if (!ok) return;
+    sendToTerminal((check.uhubctl ? '' : 'sudo apt update && sudo apt install -y uhubctl && ') + '(' + USB_POWER_CYCLE + ')\n');
+  }
+
+  async function rebootDevice() {
+    closeMenu();
+    if (!token) return;
+    const ok = await appConfirm('Reboot Raspberry Pi', 'Are you sure you want to reboot this device? The SSH connection will close.', true);
+    if (!ok) return;
+    busy(true);
+    try {
+      await json('/api/reboot', { method: 'POST' });
+      toast('Reboot command sent', 'good');
+      disconnectDevice();
+    } catch (err) {
+      toast('Reboot failed: ' + err.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  // ── Markdown Parser (GitHub Primer subset) ──
+  function markdownInline(text) {
+    var tokens = [];
+    function token(html) { tokens.push(html); return '\uE000' + (tokens.length - 1) + '\uE001'; }
+    function safeHref(href) {
+      return /^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(href) || /^[a-z0-9][a-z0-9._~\/-]*$/i.test(href);
+    }
+    text = text.replace(/`([^`]+)`/g, function (_m, code) {
+      return token('<code>' + esc(code) + '</code>');
+    });
+    text = text.replace(/\[!\[([^\]]*)\]\((https:\/\/[^)]+)\)\]\(([^)]+)\)/gi, function (_m, alt, src, href) {
+      var clean = href.trim();
+      if (!safeHref(clean)) return alt;
+      return token('<a href="' + esc(clean) + '" target="_blank" rel="noopener noreferrer"><img src="' +
+        esc(src.trim()) + '" alt="' + esc(alt) + '"></a>');
+    });
+    text = text.replace(/!\[([^\]]*)\]\((https:\/\/[^)]+)\)/gi, function (_m, alt, src) {
+      return token('<img src="' + esc(src.trim()) + '" alt="' + esc(alt) + '">');
+    });
+    text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_m, label, href) {
+      var clean = href.trim();
+      if (!safeHref(clean)) return label;
+      return token('<a href="' + esc(clean) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>');
+    });
+    text = esc(text)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/_([^_]+)_/g, '<em>$1</em>');
+    // A token can hold another (code inside a link's label), so restore them recursively.
+    function restore(html) {
+      return html.replace(/\uE000(\d+)\uE001/g, function (_m, i) { return restore(tokens[Number(i)]); });
+    }
+    return restore(text);
+  }
+
+  function safeMarkdownTable(source) {
+    var parsed = new DOMParser().parseFromString(source, 'text/html');
+    var table = parsed.body.firstElementChild;
+    if (!table || table.tagName !== 'TABLE' || parsed.body.children.length !== 1) return esc(source);
+    var allowed = ['TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'CODE'];
+    var elements = [table].concat(Array.from(table.querySelectorAll('*')));
+    for (var i = 0; i < elements.length; i++) {
+      var element = elements[i];
+      if (allowed.indexOf(element.tagName) === -1) return esc(source);
+      var width = element.getAttribute('width');
+      while (element.attributes.length) element.removeAttribute(element.attributes[0].name);
+      if (width && /^(?:100|[1-9]?\d)%$/.test(width)) element.setAttribute('width', width);
+    }
+    return table.outerHTML;
+  }
+
+  function renderMarkdown(text) {
+    var lines = text.replace(/\r\n?/g, '\n').split('\n');
+    var html = [], paragraph = [], list = null, fenced = false, fence = [];
+    function tableCells(line) {
+      var trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+      return trimmed.split('|').map(function (cell) { return cell.trim(); });
+    }
+    function flushParagraph() {
+      if (paragraph.length) html.push('<p>' + markdownInline(paragraph.join(' ')) + '</p>');
+      paragraph = [];
+    }
+    function closeList() {
+      if (list) html.push('</' + list + '>');
+      list = null;
+    }
+    for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      var line = lines[lineIndex];
+      if (/^```/.test(line)) {
+        flushParagraph(); closeList();
+        if (fenced) { html.push('<pre><code>' + esc(fence.join('\n')) + '</code></pre>'); fence = []; }
+        fenced = !fenced;
+        continue;
+      }
+      if (fenced) { fence.push(line); continue; }
+      var m;
+      if (/^<table(?:\s|>)/i.test(line.trim())) {
+        flushParagraph(); closeList();
+        var tableSource = [line];
+        while (!/<\/table>\s*$/i.test(tableSource[tableSource.length - 1]) && lineIndex + 1 < lines.length) {
+          tableSource.push(lines[++lineIndex]);
+        }
+        html.push(safeMarkdownTable(tableSource.join('\n')));
+        continue;
+      }
+      var separatorCells = lineIndex + 1 < lines.length ? tableCells(lines[lineIndex + 1]) : [];
+      if (line.includes('|') && separatorCells.length > 1 && separatorCells.every(function (cell) {
+        return /^:?-{3,}:?$/.test(cell);
+      })) {
+        flushParagraph(); closeList();
+        var headers = tableCells(line);
+        html.push('<table><thead><tr>' + headers.map(function (cell) {
+          return '<th>' + markdownInline(cell) + '</th>';
+        }).join('') + '</tr></thead><tbody>');
+        lineIndex += 2;
+        while (lineIndex < lines.length && lines[lineIndex].trim() && lines[lineIndex].includes('|')) {
+          html.push('<tr>' + tableCells(lines[lineIndex]).map(function (cell) {
+            return '<td>' + markdownInline(cell) + '</td>';
+          }).join('') + '</tr>');
+          lineIndex++;
+        }
+        html.push('</tbody></table>');
+        lineIndex--;
+        continue;
+      }
+      if (!line.trim()) { flushParagraph(); closeList(); continue; }
+      if ((m = /^(#{1,6})\s+(.+)$/.exec(line))) {
+        flushParagraph(); closeList();
+        html.push('<h' + m[1].length + '>' + markdownInline(m[2]) + '</h' + m[1].length + '>');
+      } else if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+        flushParagraph(); closeList(); html.push('<hr>');
+      } else if ((m = /^>\s?(.*)$/.exec(line))) {
+        flushParagraph(); closeList(); html.push('<blockquote><p>' + markdownInline(m[1]) + '</p></blockquote>');
+      } else if ((m = /^\s*[-*+]\s+(.+)$/.exec(line))) {
+        flushParagraph();
+        if (list !== 'ul') { closeList(); html.push('<ul>'); list = 'ul'; }
+        html.push('<li>' + markdownInline(m[1]) + '</li>');
+      } else if ((m = /^\s*\d+[.)]\s+(.+)$/.exec(line))) {
+        flushParagraph();
+        if (list !== 'ol') { closeList(); html.push('<ol>'); list = 'ol'; }
+        html.push('<li>' + markdownInline(m[1]) + '</li>');
+      } else {
+        closeList(); paragraph.push(line.trim());
+      }
+    }
+    if (fenced) html.push('<pre><code>' + esc(fence.join('\n')) + '</code></pre>');
+    flushParagraph(); closeList();
+    return html.join('');
+  }
+
+  async function showReadme() {
+    closeMenu();
+    busy(true);
+    try {
+      const res = await fetch('/api/readme');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const raw = await res.text();
+      let mdText = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.text) mdText = parsed.text;
+      } catch {}
+      const screen = $('#readme-screen');
+      const content = $('#readme-content');
+      content.innerHTML = renderMarkdown(mdText);
+      $('.view.active')?.classList.remove('active');
+      screen.style.display = 'block';
+      screen.scrollTop = 0;
+      document.title = 'Pi Bay - README.md';
+      setActiveTab('');
+    } catch (e) {
+      toast('Could not open README.md: ' + e.message, 'bad');
+    } finally {
+      busy(false);
+    }
+  }
+
+  function showAbout() {
+    closeMenu();
+    showDialog({
+      title: 'About Pi Bay',
+      messageHTML: 'An App and MCP Server for managing Raspberry Pis and other SSH devices on a LAN: find them, browse and edit their files, and run commands in an SSH terminal.<br><br>' +
+        '<strong>Version:</strong> {{VERSION}}<br>' +
+        '<strong>Author:</strong> ctrlPi<br>' +
+        '<strong>License:</strong> MIT<br><br>' +
+        '<a href="https://www.ctrlpi.com" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">' +
+          '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<circle cx="8" cy="8" r="6.25"/><path d="M1.75 8h12.5M8 1.75c1.7 1.7 2.6 3.9 2.6 6.25S9.7 12.55 8 14.25C6.3 12.55 5.4 10.35 5.4 8S6.3 3.45 8 1.75Z"/></svg>' +
+          'www.ctrlPi.com</a>',
+      footerHTML: '<strong>Contact:</strong> <a href="mailto:info@ctrlpi.com">info@ctrlpi.com</a>',
+      confirmText: 'Close',
+      cancel: false
+    });
+  }
+
+  // ── Terminal Implementation ──
+  // The rows and columns that fit the terminal's pane (its padding and scrollbar left out).
+  function terminalSize() {
+    if (!term || !term.element || !term.element.parentElement) return;
+    const core = term._core;
+    const dims = core._renderService?.dimensions;
+    if (!dims || !dims.css.cell.width || !dims.css.cell.height) return;
+    const parent = term.element.parentElement;
+    const parentStyle = window.getComputedStyle(parent);
+    const elStyle = window.getComputedStyle(term.element);
+    const parentPaddingY = (parseFloat(parentStyle.paddingTop) || 0) + (parseFloat(parentStyle.paddingBottom) || 0);
+    const parentPaddingX = (parseFloat(parentStyle.paddingLeft) || 0) + (parseFloat(parentStyle.paddingRight) || 0);
+    const elPaddingY = (parseFloat(elStyle.paddingTop) || 0) + (parseFloat(elStyle.paddingBottom) || 0);
+    const elPaddingX = (parseFloat(elStyle.paddingLeft) || 0) + (parseFloat(elStyle.paddingRight) || 0);
+    const scrollbarWidth = term.options.scrollback === 0 ? 0 : (core.viewport?.scrollBarWidth || 0);
+    const availableHeight = parent.clientHeight - parentPaddingY - elPaddingY;
+    const availableWidth = parent.clientWidth - parentPaddingX - elPaddingX - scrollbarWidth;
+    if (availableHeight <= 0 || availableWidth <= 0) return;
+    return {
+      cols: Math.max(2, Math.floor(availableWidth / dims.css.cell.width)),
+      rows: Math.max(1, Math.floor(availableHeight / dims.css.cell.height))
+    };
+  }
+  // Resizes the terminal to its pane when the size changed.
+  function fitTerminal() {
+    const size = terminalSize();
+    if (!size || (size.cols === term.cols && size.rows === term.rows)) return;
+    term._core._renderService.clear();
+    term.resize(size.cols, size.rows);
+  }
+
+  function openTerminal() {
+    if (terminalToken === token && socket && socket.readyState <= 1) {
+      setTimeout(fitTerminal, 0);
+      return;
+    }
+    if (socket) {
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.close();
+      socket = null;
+    }
+    const isDark = document.documentElement.classList.contains('dark-mode');
+    if (!term) {
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        theme: isDark
+          ? { background: '#0d1117', foreground: '#e6edf3', cursor: '#58a6ff', selectionBackground: '#1f6feb44' }
+          : { background: '#ffffff', foreground: '#1f2328', cursor: '#0969da', selectionBackground: '#b6e3ff' }
+      });
+      term.open($('#terminal'));
+      term.onData(data => socket?.readyState === 1 && socket.send(JSON.stringify({ type: 'data', data })));
+      term.onResize(x => socket?.readyState === 1 && socket.send(JSON.stringify({ type: 'resize', cols: x.cols, rows: x.rows })));
+
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => {
+          if ($('#workspace').classList.contains('terminal-mode')) {
+            fitTerminal();
+          }
+        });
+        ro.observe($('#terminal'));
+      }
+    }
+    term.reset();
+    terminalToken = token;
+    setTimeout(fitTerminal, 50);
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    socket = new WebSocket(proto + '//' + location.host + '/terminal?session=' + encodeURIComponent(token));
+    socket.binaryType = 'arraybuffer';
+    socket.onmessage = e => term.write(e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : e.data);
+    socket.onopen = () => {
+      fitTerminal();
+      if (socket.readyState === 1 && term) {
+        socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+      term.focus();
+    };
+    socket.onerror = () => term.write('\r\n\x1b[31m[terminal connection failed]\x1b[0m\r\n');
+    socket.onclose = () => term.write('\r\n\x1b[90m[terminal disconnected]\x1b[0m\r\n');
+  }
+
+  // ── Sidebar Resizing (Dragbar) ──
+  (function () {
+    const dragbar = $('#dragbar');
+    const sidebar = $('#sidebar');
+    let isDragging = false;
+    const savedWidth = localStorage.getItem('pibay-sidebar-w');
+    if (savedWidth) sidebar.style.width = savedWidth + 'px';
+
+    dragbar.addEventListener('mousedown', e => {
+      e.preventDefault();
+      isDragging = true;
+      dragbar.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      const w = Math.max(180, Math.min(600, e.clientX));
+      sidebar.style.width = w + 'px';
+      localStorage.setItem('pibay-sidebar-w', w);
+      if (term && $('#workspace').classList.contains('terminal-mode')) fitTerminal();
+    });
+    window.addEventListener('mouseup', () => {
+      if (!isDragging) return;
+      isDragging = false;
+      dragbar.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  })();
+
+  // ── Event Bindings ──
+  $('#rows').onclick = e => {
+    const tr = e.target.closest('tr[data-i]');
+    if (tr) {
+      const d = devices[+tr.dataset.i];
+      if (d.ssh) askLogin(d);
+    }
+  };
+
+  $('#pills').onclick = e => {
+    const p = e.target.closest('[data-host]');
+    if (p) {
+      const d = devices.find(x => x.host === p.dataset.host);
+      if (!d) return;
+      if (chosen && chosen.host === d.host && $('#termButton')?.classList.contains('tab-active')) {
+        term?.focus();
+        return;
+      }
+      askLogin(d);
+    }
+  };
+
+  window.onresize = () => {
+    if (term && $('#workspace').classList.contains('terminal-mode')) fitTerminal();
+  };
+
+  // Start initial network scan & fetch MCP status
+  clearViewer();
+  json('/api/mcp').then(d => setMcpEnabled(d.enabled)).catch(() => {});
+  scan();
+</script>
+</body>
+</html>

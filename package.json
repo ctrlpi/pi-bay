@@ -1,0 +1,57 @@
+{
+  "name": "@ctrlpi/pi-bay",
+  "version": "0.9.33",
+  "description": "An App and MCP Server for managing Raspberry Pis and other SSH devices on a LAN: find them, browse and edit their files, and run commands in an SSH terminal",
+  "keywords": [
+    "raspberry-pi",
+    "ssh",
+    "sftp",
+    "terminal",
+    "viewer",
+    "lan",
+    "mcp",
+    "raspberry pi",
+    "model context protocol",
+    "file manager",
+    "ctrlpi"
+  ],
+  "license": "MIT",
+  "author": "ctrlPi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ctrlpi/pi-bay.git"
+  },
+  "homepage": "https://github.com/ctrlpi/pi-bay#readme",
+  "bugs": {
+    "url": "https://github.com/ctrlpi/pi-bay/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "commonjs",
+  "main": "server.js",
+  "bin": {
+    "pi-bay": "server.js"
+  },
+  "files": [
+    "server.js",
+    "lib.js",
+    "page.html",
+    "favicon.ico",
+    "README.md",
+    "test",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch --watch-path=server.js --watch-path=page.html --watch-path=lib.js server.js --no-open",
+    "test": "node --test",
+    "prepublishOnly": "npm test"
+  },
+  "dependencies": {
+    "ssh2": "^1.16.0",
+    "ws": "^8.18.3",
+    "@xterm/xterm": "^5.5.0"
+  },
+  "engines": { "node": ">=20" }
+}
