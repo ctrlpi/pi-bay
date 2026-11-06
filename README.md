@@ -1,7 +1,7 @@
 # Pi Bay
 
 [![Platform: Cross-Platform](https://img.shields.io/badge/platform-Cross--Platform-006400.svg)](#quick-start)
-[![Version 0.9.33](https://img.shields.io/badge/version-0.9.33-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
+[![Version 0.9.34](https://img.shields.io/badge/version-0.9.34-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-blue.svg)](https://nodejs.org/)
 [![Protocol: MCP](https://img.shields.io/badge/protocol-MCP-006400.svg)](#mcp-server)
 [![Tools: 12](https://img.shields.io/badge/tools-12-006400.svg)](#mcp-tools)
@@ -56,13 +56,17 @@ pi-bay includes a dependency-free [Model Context Protocol](https://modelcontextp
 In Claude Desktop, open **Settings → Developer → Edit Config** to get to the configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or the equivalent file on Windows or Linux), and add the server under `mcpServers` enabling stdio:
 
 ```json
-"mcpServers": {
-  "pi-bay": {
-    "command": "npx",
-    "args": ["-y", "@ctrlpi/pi-bay", "--mcp-stdio"]
+{
+  "mcpServers": {
+    "pi-bay": {
+      "command": "npx",
+      "args": ["-y", "@ctrlpi/pi-bay", "--mcp-stdio"]
+    }
   }
 }
 ```
+
+Cursor takes the same JSON, here and under Streamable HTTP. Put it in `~/.cursor/mcp.json`, or in `.cursor/mcp.json` inside a project.
 
 ### Streamable HTTP
 
@@ -75,10 +79,12 @@ npx @ctrlpi/pi-bay --mcp-http
 The normal web interface remains available and MCP is served at `http://HOST:8383/mcp`. Configure the MCP agent to connect over HTTP, replacing `PI_HOST_ADDR` with the platform running pi-bay:
 
 ```json
-"mcpServers": {
-  "pi-bay": {
-    "command": "npx",
-    "args": ["-y", "mcp-remote", "http://PI_HOST_ADDR:8383/mcp", "--allow-http"]
+{
+  "mcpServers": {
+    "pi-bay": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://PI_HOST_ADDR:8383/mcp", "--allow-http"]
+    }
   }
 }
 ```
@@ -263,6 +269,7 @@ pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--a
   </tbody>
 </table>
 
+No environment variables are required: each one in the table is an optional alternative to its flag.
 Command-line values take precedence over environment variables.
 Boolean environment variables accept `true` or `false`, and `1` or `0`.
 

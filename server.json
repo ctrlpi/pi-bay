@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ctrlpi/pi-bay",
+  "description": "App and MCP server for Raspberry Pis and SSH devices on a LAN: files, terminal, ctrlPi API install.",
+  "repository": {
+    "url": "https://github.com/ctrlpi/pi-bay",
+    "source": "github"
+  },
+  "version": "0.9.34",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@ctrlpi/pi-bay",
+      "version": "0.9.34",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "--mcp-stdio",
+          "valueHint": "transport"
+        }
+      ]
+    }
+  ]
+}
