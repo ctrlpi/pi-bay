@@ -595,6 +595,9 @@
   .ssh-no {
     color: #8c959f;
   }
+  .host-alt {
+    color: #8c959f;
+  }
   .ctrl-version {
     color: #1a7f37;
     font-size: 12px;
@@ -1670,7 +1673,7 @@
     </label>
     <label class="field">
       <span>API key</span>
-      <input id="ctrlpiKey" type="text" autocomplete="off" spellcheck="false" required>
+      <input id="ctrlpiKey" type="text" autocomplete="off" spellcheck="false" placeholder="your-secret-key">
     </label>
     <div class="field">
       <span>Package</span>
@@ -1863,6 +1866,15 @@
   function deviceLabel(d) {
     return d.name && d.name !== '-' ? d.name : shortAddress(d.host);
   }
+  // True when the device has a hostname that is not its name (case and domain ignored).
+  function hostnameDiffers(d) {
+    const short = s => String(s || '').toLowerCase().split('.')[0];
+    return !!(d.hostname && d.name && d.name !== '-' && short(d.hostname) !== short(d.name));
+  }
+  // The name for the devices table, with the hostname in grey when it is a different one.
+  function deviceNameCell(d) {
+    return esc(d.name) + (hostnameDiffers(d) ? ` <span class="host-alt">(${esc(d.hostname)})</span>` : '');
+  }
   function deviceType(d) {
     if (d.ssh) {
       if (d.pi) return 'Pi';
@@ -1937,21 +1949,23 @@
         if (!pkg) pkg = 'Xtensa LX6';
       }
     } else if (type === 'Pi' || d.pi) {
+      // Models read "Pi 3 B Plus Rev 1.3", "Pi A Plus Rev 1.1", "Pi Zero 2 W Rev 1.0" ("Raspberry" and
+      // "Model" are removed); a first-generation board has no number: "Pi A ...", "Pi B ...".
+      const first = /\bPi\s*(1\s*)?(Model\s*)?[AB]\b/i.test(model);
+      const plus = /(\+|\bPlus\b)/i.test(model);
       if (!ram) {
-        if (/Zero\s*2\s*W/i.test(model)) ram = '512MB RAM';
-        else if (/Zero/i.test(model)) ram = '512MB RAM';
-        else if (/Model\s*A\b|1\s*A\b/i.test(model)) ram = '256MB RAM';
-        else if (/3\s*A\+/i.test(model)) ram = '512MB RAM';
-        else if (/3\s*B\b|3\s*B\+/i.test(model)) ram = '1GB RAM';
-        else if (/2\s*B\b/i.test(model)) ram = '1GB RAM';
+        if (/Zero/i.test(model)) ram = '512MB RAM';
+        else if (/\b3\s*A/i.test(model)) ram = '512MB RAM';
+        else if (/\b[23]\s*B/i.test(model)) ram = '1GB RAM';
+        else if (first) ram = /\bPi\s*(1\s*)?(Model\s*)?A\b/i.test(model) ? '256MB RAM' : '512MB RAM';
       }
       if (!frequency) {
         if (/Pi\s*5/i.test(model)) frequency = '2.4GHz';
         else if (/Pi\s*4/i.test(model)) frequency = '1.5GHz';
-        else if (/3\s*B\+/i.test(model)) frequency = '1.4GHz';
-        else if (/3\s*B\b/i.test(model)) frequency = '1.2GHz';
-        else if (/Zero\s*2/i.test(model)) frequency = '1.0GHz';
+        else if (/\b3\s*[AB]/i.test(model)) frequency = plus ? '1.4GHz' : '1.2GHz';
+        else if (/\b2\s*B/i.test(model)) frequency = '900MHz';
         else if (/Zero/i.test(model)) frequency = '1.0GHz';
+        else if (first) frequency = '700MHz';
       }
     }
 
@@ -1965,6 +1979,7 @@
     const hw = hardwareSpecs(d);
     return [
       'Name: ' + deviceLabel(d),
+      hostnameDiffers(d) ? 'Hostname: ' + d.hostname : null,
       'Device: ' + (d.model || deviceType(d)),
       hw.ram ? 'RAM: ' + hw.ram : null,
       hw.flash ? (deviceType(d) === 'Pi' || d.pi ? 'SD: ' : 'Flash: ') + hw.flash : null,
@@ -2005,7 +2020,7 @@
         hw.frequency ? `<span class="hw-chip">${esc(hw.frequency)}</span>` : ''
       ].filter(Boolean).join('');
       return `<tr data-i="${i}" style="${d.ssh ? '' : 'cursor:default'}">
-        <td>${esc(d.name)}</td>
+        <td>${deviceNameCell(d)}</td>
         <td><span class="badge ${badge}">${esc(parts.pill)}</span>${chips ? ' <span class="hw-chips">' + chips + '</span>' : ''}</td>
         <td>${esc(d.host)}</td>
         <td>${esc(d.mac || '-')}</td>
@@ -2118,6 +2133,11 @@
     chosen = device;
     if (session.model) {
       device.model = session.model;
+    }
+    // The hostname read at sign-in fills in when the scan found none.
+    if (session.hostname && !device.hostname) {
+      device.hostname = session.hostname;
+      if (!device.name || device.name === '-') device.name = session.hostname;
     }
     token = session.token;
     home = session.home;
@@ -2927,7 +2947,7 @@
     $('#ctrlpiName').disabled = $('#ctrlpiKey').disabled = ctrlPiHasConfig;
     $('#ctrlpiHint').textContent = ctrlPiHasConfig
       ? 'This Pi already has ~/pi-gpio-api/config.json, so its agent name and API key are kept. The installer updates pi-gpio-api in place and runs in the Terminal tab.'
-      : 'Installs pi-gpio-api into ~/pi-gpio-api. The installer runs in the Terminal tab so you can follow it.';
+      : 'Installs pi-gpio-api into ~/pi-gpio-api. The installer runs in the Terminal tab so you can follow it. An API key left empty is the default your-secret-key, which is public: anyone on the network can control the agent, and /script/write is refused until the key is changed.';
     $('#ctrlpiError').textContent = '';
     $('#ctrlpiBack').classList.add('open');
     (ctrlPiHasConfig ? $('#ctrlpiForm button[type=submit]') : $('#ctrlpiName')).focus();
@@ -2940,8 +2960,8 @@
     const pkg = document.querySelector('input[name="ctrlpiPkg"]:checked').value === 'full' ? 'full' : 'lite';
     if (!ctrlPiHasConfig) {
       const name = $('#ctrlpiName').value.trim();
-      const key = $('#ctrlpiKey').value.trim();
-      if (!name || !key) { $('#ctrlpiError').textContent = 'Agent name and API key are required.'; return; }
+      const key = $('#ctrlpiKey').value.trim() || 'your-secret-key';   // left empty: the default, shown in grey
+      if (!name) { $('#ctrlpiError').textContent = 'Agent name is required.'; return; }
       if (/[\x00-\x1f\x7f]/.test(name + key)) { $('#ctrlpiError').textContent = 'Agent name and API key cannot contain control characters.'; return; }
       try {
         await json('/api/file?path=' + encodeURIComponent('pi-gpio-api/config.json'), {

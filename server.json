@@ -6,12 +6,12 @@
     "url": "https://github.com/ctrlpi/pi-bay",
     "source": "github"
   },
-  "version": "0.9.34",
+  "version": "0.9.40",
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "@ctrlpi/pi-bay",
-      "version": "0.9.34",
+      "identifier": "pi-bay",
+      "version": "0.9.40",
       "transport": {
         "type": "stdio"
       },

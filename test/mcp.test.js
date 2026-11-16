@@ -90,7 +90,8 @@ test('MCP protocol methods', async t => {
       'pi_path_rename',
       'pi_path_delete',
       'pi_device_reboot',
-      'pi_ctrlpi_install'
+      'pi_ctrlpi_install',
+      'pi_ui'
     ]);
     assert.ok(res.result.tools.every(t => !Object.hasOwn(t, 'handler')));
     assert.ok(res.result.tools.every(t => t.inputSchema && typeof t.inputSchema === 'object'));
@@ -392,6 +393,19 @@ test('HTTP MCP endpoint (/mcp)', async t => {
   });
 });
 
+// Resolves when the child exits; a child still running after 20 s is killed and the test fails
+// with its output, instead of hanging the run.
+function childExit(child, output, event = 'exit') {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('MCP stdio child did not exit in 20 s\n' + output()));
+    }, 20000);
+    child.once('error', reject);
+    child.once(event, code => { clearTimeout(timer); resolve(code); });
+  });
+}
+
 test('MCP stdio child process', async () => {
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp-stdio'], {
     stdio: ['pipe', 'pipe', 'pipe']
@@ -402,7 +416,7 @@ test('MCP stdio child process', async () => {
   child.stdout.on('data', d => { stdout += d; });
   child.stderr.on('data', d => { stderr += d; });
 
-  const exitPromise = new Promise(resolve => child.on('exit', resolve));
+  const exitPromise = childExit(child, () => `stdout: ${stdout}\nstderr: ${stderr}`);
 
   const send = msg => child.stdin.write(JSON.stringify(msg) + '\n');
 
@@ -427,4 +441,236 @@ test('MCP stdio child process', async () => {
 
   child.stdin.end();
   await exitPromise;
+});
+
+test('MCP stdio starts without a flag when an MCP client talks on stdin', async () => {
+  const env = { ...process.env, PI_BAY_NO_OPEN: '1' };
+  delete env.PI_BAY_MCP_STDIO;
+  delete env.PI_BAY_MCP_HTTP;
+  delete env.PI_BAY_NO_MCP;
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env, stdio: ['pipe', 'pipe', 'pipe']
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', d => { stdout += d; });
+  child.stderr.on('data', d => { stderr += d; });
+  child.stdin.end(JSON.stringify({
+    jsonrpc: '2.0', id: 31, method: 'initialize',
+    params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } }
+  }) + '\n' + JSON.stringify({ jsonrpc: '2.0', id: 32, method: 'ping' }) + '\n');
+  await childExit(child, () => `stdout: ${stdout}\nstderr: ${stderr}`, 'close');
+  const replies = stdout.trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(replies.map(reply => reply.id), [31, 32]);
+  assert.equal(replies[0].result.serverInfo.name, 'pi-bay');
+});
+
+// The whole module, for the helpers below.
+const app = require('../server');
+
+test('MCP stdio detection', async (t) => {
+  const { PassThrough } = require('node:stream');
+
+  await t.test('recognises a JSON-RPC line only', () => {
+    assert.equal(app.isMcpLine('{"jsonrpc":"2.0","id":1,"method":"initialize"}'), true);
+    assert.equal(app.isMcpLine('{"jsonrpc":"1.0","method":"initialize"}'), false);
+    assert.equal(app.isMcpLine('{"hello":1}'), false);
+    assert.equal(app.isMcpLine('hello'), false);
+    assert.equal(app.isMcpLine('null'), false);
+  });
+
+  await t.test('an MCP first line is detected and left in the stream', async () => {
+    const input = new PassThrough();
+    const line = '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n';
+    const detected = app.detectMcpStdio(input, 1000);
+    input.write(line.slice(0, 10));
+    input.write(line.slice(10) + 'next');
+    assert.equal(await detected, true);
+    assert.equal(input.read().toString(), line + 'next');
+  });
+
+  await t.test('other input, a closed stdin and silence are not MCP', async () => {
+    const text = new PassThrough();
+    const fromText = app.detectMcpStdio(text, 1000);
+    text.write('hello\n');
+    assert.equal(await fromText, false);
+
+    const closed = new PassThrough();
+    const fromClosed = app.detectMcpStdio(closed, 1000);
+    closed.end();
+    assert.equal(await fromClosed, false);
+
+    assert.equal(await app.detectMcpStdio(new PassThrough(), 20), false);
+  });
+
+  await t.test('a /dev/null stdin is not a pipe', () => {
+    const fd = fs.openSync(os.devNull, 'r');
+    try { assert.equal(app.stdinIsPipe(fd), false); }
+    finally { fs.closeSync(fd); }
+    assert.equal(app.stdinIsPipe(-1), false);
+  });
+});
+
+test('pi_ui', async (t) => {
+  let opened = [];
+  app._test.setUiServerPort(7999);
+  app._test.setBrowserOpener(url => opened.push(url));
+  t.after(() => {
+    app._test.setUiServerPort(null);
+    app._test.setBrowserOpener(null);
+  });
+
+  await t.test('opens the local browser on a desktop', async () => {
+    opened = [];
+    const result = await app.openUi({}, { raspberryPiHost: false, noOpen: false, env: {} });
+    assert.equal(result.opened, true);
+    assert.match(result.url, /^http:\/\/[^/]+:7999$/);
+    assert.deepEqual(opened, [result.url]);
+  });
+
+  await t.test('returns the address instead when the client is on another computer', async () => {
+    opened = [];
+    const pi = { raspberryPiHost: true, noOpen: false };
+    // HTTP MCP: the host the client reached.
+    const overHttp = await app.openUi({ host: 'b4.local:8383' }, { ...pi, env: {} });
+    assert.equal(overHttp.url, 'http://b4.local:8383');
+    assert.equal(overHttp.opened, false);
+    // stdio over ssh: the address the session came in on.
+    const overSsh = await app.openUi({}, { ...pi, env: { SSH_CONNECTION: '192.168.1.5 50000 192.168.1.44 22' } });
+    assert.equal(overSsh.url, 'http://192.168.1.44:7999');
+    // Not a Pi, but reached over ssh or by a LAN address.
+    const desktop = { raspberryPiHost: false, noOpen: false };
+    assert.equal((await app.openUi({}, { ...desktop, env: { SSH_CONNECTION: 'fe80::1 5 fe80::2 22' } })).url,
+      'http://[fe80::2]:7999');
+    assert.equal((await app.openUi({ host: '192.168.1.9:8383' }, { ...desktop, env: {} })).opened, false);
+    assert.equal((await app.openUi({ host: 'localhost:8383' }, { ...desktop, env: {} })).opened, true);
+    assert.equal(opened.length, 1);
+  });
+
+  await t.test('--no-open returns the address without opening', async () => {
+    opened = [];
+    const result = await app.openUi({}, { raspberryPiHost: false, noOpen: true, env: {} });
+    assert.equal(result.opened, false);
+    assert.deepEqual(opened, []);
+  });
+
+  await t.test('action stop leaves a server it did not start', async () => {
+    const result = await app.stopUi();
+    assert.equal(result.stopped, false);
+    assert.match(result.message, /not started by this tool/);
+    const bad = await app.dispatchMcp({
+      jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'pi_ui', arguments: { action: 'close' } }
+    });
+    assert.equal(bad.result.isError, true);
+  });
+
+  await t.test('rejects unknown arguments', async () => {
+    const bad = await app.dispatchMcp({
+      jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'pi_ui', arguments: { url: 'x' } }
+    });
+    assert.equal(bad.result.isError, true);
+    const reply = await app.dispatchMcp({
+      jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'pi_ui', arguments: {} }
+    }, { host: '10.0.0.7:8383' });
+    assert.equal(reply.result.structuredContent.url, 'http://10.0.0.7:8383');
+  });
+
+  await t.test('serves the UI from a stdio MCP process', async () => {
+    const env = { ...process.env };
+    delete env.SSH_CONNECTION;
+    const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp-stdio', '--port', '0', '--no-open'], {
+      env, stdio: ['pipe', 'pipe', 'pipe']
+    });
+    try {
+      const reply = new Promise((resolve, reject) => {
+        let stdout = '';
+        child.once('error', reject);
+        child.once('close', () => reject(new Error('pi-bay exited: ' + stdout)));
+        child.stdout.on('data', chunk => {
+          stdout += chunk;
+          if (stdout.includes('\n')) resolve(JSON.parse(stdout.split('\n')[0]));
+        });
+      });
+      child.stdin.write(JSON.stringify({
+        jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'pi_ui', arguments: {} }
+      }) + '\n');
+      const result = (await reply).result.structuredContent;
+      assert.equal(result.opened, false);
+      const page = await fetch(result.url);
+      assert.equal(page.status, 200);
+      assert.match(await page.text(), /<title>Pi Bay<\/title>/);
+
+      // action stop closes it, a second stop has nothing to close, and open starts it again.
+      const next = () => new Promise(resolve => {
+        let text = '';
+        const onData = chunk => {
+          text += chunk;
+          if (!text.includes('\n')) return;
+          child.stdout.off('data', onData);
+          resolve(JSON.parse(text.split('\n')[0]).result.structuredContent);
+        };
+        child.stdout.on('data', onData);
+      });
+      const send = (id, args) => child.stdin.write(JSON.stringify({
+        jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'pi_ui', arguments: args }
+      }) + '\n');
+      let answer = next();
+      send(41, { action: 'stop' });
+      assert.deepEqual(await answer, { stopped: true });
+      await assert.rejects(fetch(result.url));
+      answer = next();
+      send(42, { action: 'stop' });
+      assert.equal((await answer).stopped, false);
+      answer = next();
+      send(43, { action: 'open' });
+      assert.equal((await fetch((await answer).url)).status, 200);
+    } finally {
+      child.kill();
+    }
+  });
+});
+
+test('busy port', async (t) => {
+  const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+  const close = server => new Promise(resolve => server.close(resolve));
+
+  await t.test('moves to a following port when another program holds it', async () => {
+    const other = http.createServer();
+    const busy = await listen(other);
+    const server = http.createServer();
+    try {
+      const result = await app.listenOnFreePort(server, busy, '127.0.0.1', 3, async () => false);
+      assert.equal(result.existing, undefined);
+      assert.ok(result.port > busy && result.port <= busy + 3, 'port ' + result.port);
+      assert.equal(server.address().port, result.port);
+    } finally {
+      await close(server);
+      await close(other);
+    }
+  });
+
+  await t.test('uses the same app already on the port instead of a second copy', async () => {
+    const other = http.createServer();
+    const busy = await listen(other);
+    const server = http.createServer();
+    try {
+      const result = await app.listenOnFreePort(server, busy, '127.0.0.1', 3, async port => port === busy);
+      assert.deepEqual(result, { port: busy, existing: true });
+      assert.equal(server.listening, false);
+    } finally {
+      await close(other);
+    }
+  });
+
+  await t.test('fails on a busy port when no fallback is allowed', async () => {
+    const other = http.createServer();
+    const busy = await listen(other);
+    try {
+      await assert.rejects(
+        app.listenOnFreePort(http.createServer(), busy, '127.0.0.1', 0, async () => false),
+        { code: 'EADDRINUSE' });
+    } finally {
+      await close(other);
+    }
+  });
 });

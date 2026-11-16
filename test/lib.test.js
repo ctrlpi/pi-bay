@@ -11,6 +11,8 @@ const {
   cleanVersion,
   modelParts,
   hardwareSpecs,
+  nominalRam,
+  modelFamily,
   crc32,
   createZipBuffer,
   parseZipBuffer,
@@ -221,6 +223,39 @@ test('hardwareSpecs extracts and deduces RAM, Flash, Revision, Package, and Freq
     }),
     { ram: '4GB RAM', flash: '32GB SD', revision: 'Rev 1.1', package: null, frequency: '1.5GHz' }
   );
+});
+
+test('hardwareSpecs has typical RAM and clock for every Pi model with a fixed size', () => {
+  const specs = model => { const h = hardwareSpecs({ model, pi: true }); return [h.ram, h.frequency]; };
+  assert.deepEqual(specs('Pi A Plus Rev 1.1'), ['256MB RAM', '700MHz']);
+  assert.deepEqual(specs('Pi B Rev 2'), ['512MB RAM', '700MHz']);
+  assert.deepEqual(specs('Pi B Plus Rev 1.2'), ['512MB RAM', '700MHz']);
+  assert.deepEqual(specs('Pi 2 B Rev 1.1'), ['1GB RAM', '900MHz']);
+  assert.deepEqual(specs('Pi 3 B Rev 1.2'), ['1GB RAM', '1.2GHz']);
+  assert.deepEqual(specs('Pi 3 B Plus Rev 1.3'), ['1GB RAM', '1.4GHz']);
+  assert.deepEqual(specs('Pi 3 A Plus Rev 1.0'), ['512MB RAM', '1.4GHz']);
+  assert.deepEqual(specs('Pi Zero W Rev 1.1'), ['512MB RAM', '1.0GHz']);
+  // Sold with several RAM sizes: no guess.
+  assert.deepEqual(specs('Pi 4 B Rev 1.1'), [null, '1.5GHz']);
+  assert.deepEqual(specs('Pi 5 B Rev 1.1'), [null, '2.4GHz']);
+});
+
+test('nominalRam rounds a measured size up to the board size', () => {
+  assert.equal(nominalRam('174MB RAM'), '256MB RAM');
+  assert.equal(nominalRam('415MB RAM'), '512MB RAM');
+  assert.equal(nominalRam('427MB'), '512MB RAM');
+  assert.equal(nominalRam('921MB RAM'), '1GB RAM');
+  assert.equal(nominalRam('1GB RAM'), '1GB RAM');
+  assert.equal(nominalRam('2GB RAM'), '2GB RAM');
+  assert.equal(nominalRam('8GB'), '8GB RAM');
+  assert.equal(nominalRam('264KB RAM'), '264KB RAM');
+  assert.equal(nominalRam(null), null);
+});
+
+test('modelFamily ignores the revision', () => {
+  assert.equal(modelFamily('Pi Zero W Rev 1.1'), modelFamily('Pi  Zero W Rev 1.3'));
+  assert.notEqual(modelFamily('Pi Zero W Rev 1.1'), modelFamily('Pi Zero 2 W Rev 1.0'));
+  assert.notEqual(modelFamily('Pi 5 B Rev 1.1'), modelFamily('Generic ESP32S3 module with ESP32-S3'));
 });
 
 test('crc32 produces correct standard checksums', () => {

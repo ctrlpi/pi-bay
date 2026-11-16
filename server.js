@@ -18,7 +18,7 @@ const { Client } = require('ssh2');
 const { WebSocketServer } = require('ws');
 const {
   normalizeMac, isPi, remotePath, safeRelative, deviceKey, uniqueMacs, cleanVersion,
-  modelParts, hardwareSpecs, crc32, createZipBuffer, parseZipBuffer, isRaspberryPi, envEnabled,
+  modelParts, hardwareSpecs, nominalRam, modelFamily, crc32, createZipBuffer, parseZipBuffer, isRaspberryPi, envEnabled,
   selectMcpTransports, shouldOpenBrowser, asText, decodeMcpContent
 } = require('./lib');
 const VERSION = require('./package.json').version;
@@ -45,7 +45,7 @@ Options:
   --api-port PORT     ctrlPi API port (default 8314)
   --api-key KEY       ctrlPi API key
   --no-open           Do not open a browser
-  --mcp-stdio         Run MCP over stdio
+  --mcp-stdio         Run MCP over stdio (automatic when an MCP client starts pi-bay)
   --mcp-http          Enable MCP over HTTP
   --no-mcp            Disable MCP
   --help              Show this help
@@ -70,10 +70,15 @@ const selectedMcp = selectMcpTransports({
 });
 const mcpStdio = selectedMcp.stdio;
 let enableMcp = selectedMcp.http;
+// With no MCP flag or variable at all, a piped stdin is checked for an MCP client.
+const mcpAutodetect = !cliNoMcp && !cliMcpStdio && !cliMcpHttp &&
+  process.env.PI_BAY_MCP_STDIO === undefined && process.env.PI_BAY_MCP_HTTP === undefined;
 // --no-mcp together with an MCP transport flag is refused at startup.
 const conflictingMcpFlags = cliNoMcp && (cliMcpStdio || cliMcpHttp);
 
 const PORT = Number(arg('--port', arg('-p', process.env.PORT || 8383)));
+// How many ports after PORT are tried when another program holds it.
+const PORT_FALLBACKS = 3;
 const HOST = arg('--host', process.env.PI_BAY_HOST || (RASPBERRY_PI_HOST ? '0.0.0.0' : '127.0.0.1'));
 // Extra host names the web server answers to (comma-separated or repeated); the --host
 // name is one of them, so a server started on a name can be opened by that name.
@@ -362,13 +367,14 @@ async function scanNetwork(force = false, onDevice = null) {
         const config = hello.ctrlpi ? await ctrlPiConfig(ip) : { model: null, version: null, os: null, ram: null, flash: null, revision: null, package: null, frequency: null };
         if (ssh || hello.ctrlpi) {
           found.push(ip);
-          flags.set(ip, { ssh, hello, config });
-          let name = hello.name;
-          if (!name) try { name = (await dns.reverse(ip))[0] || null } catch {}
-          name = name || '-';
+          // The name is the agent's own name, else the hostname the network gives.
+          let hostname = null;
+          try { hostname = (await dns.reverse(ip))[0] || null } catch {}
+          flags.set(ip, { ssh, hello, config, hostname });
+          const name = hello.name || hostname || '-';
           const mac = initialArp[ip] || '';
           if (onDevice) onDevice({
-            host: ip, name, mac, pi: isPi(mac, name), ssh, ctrlpi: hello.ctrlpi,
+            host: ip, name, hostname, mac, pi: isPi(mac, name), ssh, ctrlpi: hello.ctrlpi,
             model: config.model, version: config.version, os: config.os, ram: config.ram, flash: config.flash,
             revision: config.revision, package: config.package, frequency: config.frequency, port: SSH_PORT
           });
@@ -381,13 +387,13 @@ async function scanNetwork(force = false, onDevice = null) {
     const arp = uniqueMacs(rawArp, sharedMacs);
     scanCache = await Promise.all(found.sort((a, b) => Number(a.split('.')[3]) - Number(b.split('.')[3])).map(async ip => {
       const probe = flags.get(ip);
-      let name = probe.hello.name;
-      if (!name) try { name = (await dns.reverse(ip))[0] || null; } catch {}
-      if (!name) name = bonjour[ip] || await smbName(ip);
-      name = name || '-';
+      // Hostname: reverse DNS, then Bonjour, then SMB (only for a device with no agent name).
+      let hostname = probe.hostname || bonjour[ip] || null;
+      if (!hostname && !probe.hello.name) hostname = await smbName(ip);
+      const name = probe.hello.name || hostname || '-';
       const mac = arp[ip] || '';
       const device = {
-        host: ip, name, mac, pi: isPi(mac, name), ssh: probe.ssh, ctrlpi: probe.hello.ctrlpi,
+        host: ip, name, hostname, mac, pi: isPi(mac, name), ssh: probe.ssh, ctrlpi: probe.hello.ctrlpi,
         model: probe.config.model, version: probe.config.version, os: probe.config.os, ram: probe.config.ram, flash: probe.config.flash,
         revision: probe.config.revision, package: probe.config.package, frequency: probe.config.frequency, port: SSH_PORT
       };
@@ -654,30 +660,45 @@ function decorateDevice(device, cfg) {
     }
   }
 
+  // RAM and SD size are read at an SSH sign-in and saved. They belong to the board that was signed
+  // in to: when another kind of board now answers at this address, or the board is a microcontroller
+  // (never signed in to), the saved specs are dropped.
+  const model = device.model || saved.model || '';
+  const otherBoard = !!(device.model && saved.model && modelFamily(device.model) !== modelFamily(saved.model));
+  const specs = otherBoard || /ESP32|Pico/i.test(model) ? {} : saved;
+  if (specs !== saved && cfg.devices[found.key] && ['ram', 'flash', 'revision', 'package', 'frequency'].some(f => cfg.devices[found.key][f])) {
+    for (const field of ['ram', 'flash', 'revision', 'package', 'frequency']) cfg.devices[found.key][field] = null;
+    changed = true;
+  }
+
   if (device.model && device.model !== saved.model) {
     cfg.devices[currentKey] = {
       ...saved,
       host: device.host,
       mac: device.mac || saved.mac || '',
       model: device.model,
-      ram: device.ram || saved.ram || null,
-      flash: device.flash || saved.flash || null,
-      revision: device.revision || saved.revision || null,
-      package: device.package || saved.package || null,
-      frequency: device.frequency || saved.frequency || null
+      ram: device.ram || specs.ram || null,
+      flash: device.flash || specs.flash || null,
+      revision: device.revision || specs.revision || null,
+      package: device.package || specs.package || null,
+      frequency: device.frequency || specs.frequency || null
     };
     if (found.key !== currentKey) delete cfg.devices[found.key];
     changed = true;
   }
   if (changed) try { configWrite(cfg); } catch {}
+  // The hostname read at sign-in fills in when the scan found none, and names a device that has no name.
+  const hostname = device.hostname || saved.hostname || null;
   return {
     ...device,
+    name: device.name && device.name !== '-' ? device.name : (hostname || '-'),
+    hostname,
     model: device.model || safeSavedModel || null,
-    ram: device.ram || saved.ram || null,
-    flash: device.flash || saved.flash || null,
-    revision: device.revision || saved.revision || null,
-    package: device.package || saved.package || null,
-    frequency: device.frequency || saved.frequency || null,
+    ram: device.ram || nominalRam(specs.ram) || null,
+    flash: device.flash || specs.flash || null,
+    revision: device.revision || specs.revision || null,
+    package: device.package || specs.package || null,
+    frequency: device.frequency || specs.frequency || null,
     username: saved.username || 'pi',
     saved: !!saved.saved
   };
@@ -695,6 +716,7 @@ function resolveDevice(deviceId) {
       (d.host && d.host.toLowerCase() === norm) ||
       (d.mac && normalizeMac(d.mac) === normMac) ||
       (d.name && d.name.toLowerCase() === norm) ||
+      (d.hostname && d.hostname.toLowerCase() === norm) ||
       deviceKey(d.host, d.mac).toLowerCase() === norm
     );
     if (match) return match;
@@ -877,6 +899,7 @@ const MCP_TOOLS = [
           device_id: deviceKey(dec.host, dec.mac),
           host: dec.host,
           name: dec.name,
+          hostname: dec.hostname,
           mac: dec.mac,
           pi: dec.pi,
           ssh: dec.ssh,
@@ -1411,8 +1434,147 @@ free -m 2>/dev/null | awk '/^Mem:/ {print $2 "|" $3 "|" $4}' || cat /proc/meminf
         output: output.length > 6000 ? '...' + output.slice(-6000) : output
       });
     }
+  },
+  {
+    // Opens the web UI, starting its server first under stdio MCP, or stops that server.
+    name: 'pi_ui',
+    title: 'Open or stop the pi-bay web UI',
+    description: 'Open the pi-bay web UI (devices, files, terminal) in the browser, starting its web server when needed (action open, the default). When pi-bay runs on a Raspberry Pi or another remote machine it cannot open the user\'s browser: the result then has opened: false, and url is the address to open in a browser on the user\'s computer. Action stop stops a web server this tool started; the pi-bay app itself is never stopped.',
+    inputSchema: {
+      type: 'object', additionalProperties: false,
+      properties: { action: { type: 'string', enum: ['open', 'stop'], description: 'open (default) or stop.' } }
+    },
+    annotations: additiveAnnotations,
+    handler: async (raw, context) => {
+      const args = validateToolArgs(raw, ['action']);
+      const action = args.action === undefined ? 'open' : args.action;
+      if (action !== 'open' && action !== 'stop') throw new Error('action must be one of: open, stop');
+      return mcpToolResult(action === 'stop' ? await stopUi() : await openUi(context));
+    }
   }
 ];
+
+// The web server behind pi_ui, as a promise of its port: the one started at
+// launch, the same server started here on the first call under stdio MCP, or another
+// pi-bay already listening on the port.
+let uiServerReady = null;
+// True when ensureUiServer() itself started the server: only then may action stop close it.
+let uiServerOwned = false;
+// Replaced in the tests.
+let browserOpener = url => openBrowser(url);
+
+// Whether a pi-bay answers on this port of the local machine.
+function piBayOnPort(port) {
+  return new Promise(resolve => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/mcp', timeout: 5000 }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { if (body.length < 1e5) body += chunk; });
+      res.on('end', () => {
+        try { resolve(typeof JSON.parse(body).enabled === 'boolean'); }
+        catch { resolve(false); }
+      });
+    });
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(false));
+  });
+}
+
+// Listens on `port`, or on one of the next `extra` ports when another program holds it.
+// Resolves {port} once listening, or {port, existing: true} when a busy port is answered
+// by this same app (it is used, not doubled); rejects with the listen error otherwise.
+async function listenOnFreePort(server, port, host, extra, sameApp) {
+  for (let candidate = port; ; candidate++) {
+    const error = await new Promise(resolve => {
+      server.once('error', resolve);
+      server.listen(candidate, host, () => { server.off('error', resolve); resolve(null); });
+    });
+    if (!error) return { port: server.address().port };
+    if (error.code !== 'EADDRINUSE') throw error;
+    if (await sameApp(candidate)) return { port: candidate, existing: true };
+    if (candidate >= port + extra) throw error;
+  }
+}
+
+// The tool returns the address, so a busy port moves to the next ones; a pi-bay
+// already there (usually the app itself) is used as it is.
+function ensureUiServer() {
+  if (uiServerReady) return uiServerReady;
+  const ready = listenOnFreePort(server, PORT, HOST, PORT_FALLBACKS, piBayOnPort)
+    .then(({ port, existing }) => {
+      if (!existing) uiServerOwned = true;
+      return { port };
+    }, error => {
+      throw new Error(error.code === 'EADDRINUSE'
+        ? 'Ports ' + PORT + ' to ' + (PORT + PORT_FALLBACKS) + ' are used by other programs. Start pi-bay with --port to choose another.'
+        : 'Could not start the web server: ' + String(error.message || error));
+    });
+  uiServerReady = ready;
+  // A failed start is tried again on the next call.
+  ready.catch(() => { if (uiServerReady === ready) uiServerReady = null; });
+  return ready;
+}
+
+// True for a Host header naming this machine itself.
+function loopbackHost(hostHeader) {
+  const name = String(hostHeader || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+  return name === 'localhost' || name === '::1' || /^127\./.test(name);
+}
+
+// The address a client on another computer opens: the host it reached HTTP MCP at, the
+// address its ssh session came in on (stdio MCP over ssh), else the fallback.
+function remoteUiUrl(hostHeader, port, sshConnection, fallback) {
+  if (hostHeader) return 'http://' + hostHeader;
+  const address = String(sshConnection || '').split(' ')[2] || '';
+  if (net.isIP(address)) return 'http://' + (address.includes(':') ? '[' + address + ']' : address) + ':' + port;
+  return fallback;
+}
+
+// pi_ui action stop: closes the web server ensureUiServer() started, with the pages'
+// connections, terminals and SSH sessions (the MCP tools' own sessions stay). The app's
+// own server and another running pi-bay are left alone.
+async function stopUi() {
+  if (uiServerReady) await uiServerReady.catch(() => {});
+  if (!uiServerReady) return { stopped: false, message: 'The web UI is not running.' };
+  if (!uiServerOwned) return { stopped: false, message: 'The web UI was not started by this tool (it is the pi-bay app itself, or another running pi-bay), so it is left running.' };
+  uiServerOwned = false;
+  uiServerReady = null;
+  for (const s of sessions.values()) { try { s.client.end(); } catch {} }
+  sessions.clear();
+  await new Promise(resolve => {
+    server.close(resolve);
+    for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections();
+  });
+  return { stopped: true };
+}
+
+// pi_ui action open: makes sure the UI is served, then opens it here, or returns the address
+// when the client is on another computer (a Raspberry Pi host, HTTP MCP reached by a
+// LAN address, stdio MCP over ssh) or the browser is disabled (--no-open).
+async function openUi(context = {}, options = {}) {
+  const { port } = await ensureUiServer();
+  const env = options.env || process.env;
+  const raspberryPi = options.raspberryPiHost === undefined ? RASPBERRY_PI_HOST : options.raspberryPiHost;
+  const remote = raspberryPi ||
+    (context.host ? !loopbackHost(context.host) : !!env.SSH_CONNECTION);
+  const anyAddress = HOST === '0.0.0.0' || HOST === '::';
+  const local = 'http://' + (anyAddress ? 'localhost' : HOST) + ':' + port;
+  if (!remote && !(options.noOpen === undefined ? noOpen : options.noOpen)) {
+    browserOpener(local);
+    return { url: local, opened: true };
+  }
+  let url = local;
+  if (remote) {
+    // The LAN address when listening on every interface (the Pi default).
+    const lan = anyAddress || raspberryPi ? await localIPv4() : null;
+    url = remoteUiUrl(context.host, port, env.SSH_CONNECTION, lan ? 'http://' + lan.address + ':' + port : local);
+  }
+  return {
+    url, opened: false,
+    message: 'The browser was not opened. Open this URL in a browser on the user\'s computer.'
+  };
+}
 
 // Requests carrying the 2026-07-28 protocol in _meta get modern result envelopes; others use the legacy initialize flow.
 function modernMcpRequest(msg) {
@@ -1431,7 +1593,8 @@ function completeMcpResult(result, modern) {
 }
 
 // Answers one MCP JSON-RPC message (shared by stdio and HTTP); null for a notification.
-async function dispatchMcp(msg) {
+// `context.host` is the Host header of an HTTP MCP request (absent under stdio).
+async function dispatchMcp(msg, context = {}) {
   const id = msg && msg.id;
   const isRequest = id !== undefined && id !== null;
   const ok = result => ({ jsonrpc: '2.0', id, result });
@@ -1492,7 +1655,7 @@ async function dispatchMcp(msg) {
       // A tool error becomes an isError result, not a JSON-RPC error.
       let result;
       try {
-        result = await tool.handler(params.arguments || {});
+        result = await tool.handler(params.arguments || {}, context);
       } catch (error) {
         result = mcpToolResult({ error: String(error.message || error) }, true);
       }
@@ -1502,6 +1665,55 @@ async function dispatchMcp(msg) {
   } catch (error) {
     return isRequest ? fail(-32603, 'Internal error: ' + String(error.message || error)) : null;
   }
+}
+
+// True when stdin is a pipe or a socket, which is how an MCP client (or ssh without a
+// terminal) starts a server. A terminal, /dev/null (a service, cron) and a file are not.
+function stdinIsPipe(fd = 0) {
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.isFIFO() || stat.isSocket()) return true;
+  } catch { /* fall through to the Windows check */ }
+  // Windows may not report a pipe as a FIFO; Node still opens it as a socket stream. A terminal
+  // is a socket stream too, so it is ruled out by isTTY.
+  return fd === 0 && process.platform === 'win32' && process.stdin instanceof net.Socket && !process.stdin.isTTY;
+}
+
+// Whether a line is a JSON-RPC 2.0 message, the first thing an MCP client sends.
+function isMcpLine(line) {
+  try {
+    const msg = JSON.parse(line);
+    return !!msg && msg.jsonrpc === '2.0' && typeof msg.method === 'string';
+  } catch { return false; }
+}
+
+// Started with no MCP flag on a piped stdin: resolves true when the first line is an MCP
+// message, false when it is anything else, stdin ends, or nothing arrives in time. The
+// bytes read go back into the stream, so runMcpStdio() sees them again.
+function detectMcpStdio(input = process.stdin, timeoutMs = 2000) {
+  return new Promise(resolve => {
+    const chunks = [];
+    const finish = () => {
+      clearTimeout(timer);
+      input.off('data', onData);
+      input.off('end', finish);
+      input.off('error', finish);
+      input.pause();
+      const seen = Buffer.concat(chunks);
+      const newline = seen.indexOf(10);
+      const mcp = newline >= 0 && isMcpLine(seen.subarray(0, newline).toString('utf8'));
+      if (mcp) input.unshift(seen);
+      resolve(mcp);
+    };
+    const onData = chunk => {
+      chunks.push(Buffer.from(chunk));
+      if (chunks[chunks.length - 1].includes(10)) finish();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    input.on('data', onData);
+    input.once('end', finish);
+    input.once('error', finish);
+  });
 }
 
 // MCP over stdio: one JSON-RPC message per line; logs go to stderr.
@@ -1616,7 +1828,7 @@ async function handleMcpHttp(req, res) {
   }
   if (toolCall) mcpHttpActive++;
   let response;
-  try { response = await dispatchMcp(msg); }
+  try { response = await dispatchMcp(msg, { host: req.headers.host }); }
   finally { if (toolCall) mcpHttpActive--; }
   if (!response) {
     res.writeHead(202);
@@ -1718,7 +1930,10 @@ const server = http.createServer(async (req, res) => {
       const model = rawModel ? rawModel.replace(/\bRaspberry\b/gi, '').replace(/\bModel\b/gi, '').replace(/\s+/g, ' ').trim() : null;
       const hwRaw = (await execSSH(client, "awk '/MemTotal/ {m=int($2/1024); if (m>=900) printf \"%.0fGB RAM\", (m+128)/1024; else printf \"%dMB RAM\", m}' /proc/meminfo 2>/dev/null; echo '---'; df -h / 2>/dev/null | awk 'NR==2 {print $2 \" SD\"}'").catch(() => '')).trim();
       let hwRam = null, hwDisk = null;
-      if (hwRaw) { const [rPart, dPart] = hwRaw.split('---').map(s => s.trim()); if (rPart) hwRam = rPart; if (dPart) hwDisk = dPart; }
+      if (hwRaw) { const [rPart, dPart] = hwRaw.split('---').map(s => s.trim()); if (rPart) hwRam = nominalRam(rPart); if (dPart) hwDisk = dPart; }
+      // The device's own hostname, kept for the device list.
+      const rawHost = (await execSSH(client, 'cat /etc/hostname 2>/dev/null || hostname').catch(() => '')).trim().split('\n')[0].trim();
+      const hostname = /^[A-Za-z0-9._-]{1,253}$/.test(rawHost) ? rawHost : null;
       const token = crypto.randomBytes(24).toString('hex');
       sessions.set(token, { client, host: body.host, port: Number(body.port) || SSH_PORT, username, home, lastUsed: Date.now() });
       client.on('close', () => sessions.delete(token));
@@ -1728,7 +1943,8 @@ const server = http.createServer(async (req, res) => {
         if (body.savePassword) { await keychainSet(key, password); if (found.key !== key) await keychainDelete(found.key); } else await keychainDelete(found.key);
         cfg.devices[key] = {
           ...saved, host: body.host, mac: body.mac || saved.mac || '', username, saved: !!body.savePassword,
-          model: model || saved.model || null, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null
+          model: model || saved.model || null, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null,
+          hostname: hostname || saved.hostname || null
         };
         if (found.key !== key) delete cfg.devices[found.key];
         configWrite(cfg);
@@ -1737,12 +1953,13 @@ const server = http.createServer(async (req, res) => {
         credentialWarning = 'Connected, but credentials could not be saved: ' + (e.message || String(e));
         cfg.devices[key] = {
           ...saved, host: body.host, mac: body.mac || saved.mac || '', username, saved: false,
-          model: model || saved.model || null, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null
+          model: model || saved.model || null, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null,
+          hostname: hostname || saved.hostname || null
         };
         if (found.key !== key) delete cfg.devices[found.key];
         try { configWrite(cfg) } catch {}
       }
-      return sendJSON(res, 200, { token, home, username, model, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null, credentialWarning });
+      return sendJSON(res, 200, { token, home, username, model, hostname, ram: hwRam || saved.ram || null, flash: hwDisk || saved.flash || null, credentialWarning });
     }
     // Everything below needs a signed-in session (the X-Pi-Session header, or ?session= for downloads).
     const authedRoutes = ['/api/disconnect', '/api/reboot', '/api/usb-power', '/api/zip', '/api/restore', '/api/files', '/api/file', '/api/mkdir', '/api/touch', '/api/rename'];
@@ -1907,7 +2124,38 @@ function shutdown() {
   for (const s of sessions.values()) { try { s.client.end(); } catch {} }
   for (const s of mcpSessions.values()) { try { s.client.end(); } catch {} }
   server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 1500).unref();
+  // An open page keeps its connections, so close() may never finish: exit anyway.
+  setTimeout(() => process.exit(0), 500).unref();
+}
+
+// The web UI (and /mcp when enabled); the browser opens except on a Pi or with --no-open.
+// A pi-bay already on the port is opened instead of starting a second one. A default
+// port held by another program moves to one of the next PORT_FALLBACKS ports, but never
+// a port that was asked for, a Raspberry Pi host or HTTP MCP: bookmarks and MCP clients
+// are set to a fixed address.
+function startWeb() {
+  const portAsked = args.includes('--port') || args.includes('-p') || !!process.env.PORT;
+  const extra = !portAsked && !RASPBERRY_PI_HOST && !enableMcp ? PORT_FALLBACKS : 0;
+  listenOnFreePort(server, PORT, HOST, extra, piBayOnPort).then(({ port, existing }) => {
+    const url = `http://${HOST}:${port}`;
+    if (existing) {
+      console.log(`pi-bay is already running: ${url}`);
+      if (shouldOpenBrowser(noOpen, RASPBERRY_PI_HOST)) openBrowser(url);
+      else process.exitCode = 1;
+      return;
+    }
+    uiServerReady = Promise.resolve({ port });
+    if (PORT && port !== PORT) console.log(`Port ${PORT} is in use, using ${port}`);
+    console.log(`pi-bay: ${url}`);
+    if (enableMcp) console.log(`mcp: ${url}/mcp`);
+    if (shouldOpenBrowser(noOpen, RASPBERRY_PI_HOST)) openBrowser(url);
+  }, error => {
+    const busy = extra ? `Ports ${PORT} to ${PORT + extra} are already in use: ${HOST}` : `Port is already in use: ${HOST}:${PORT}`;
+    console.error(error.code === 'EADDRINUSE'
+      ? `${busy}\nChoose another port: pi-bay --port ${PORT + extra + 1}`
+      : 'Could not start pi-bay: ' + String(error.message || error));
+    process.exitCode = 1;
+  });
 }
 
 if (require.main === module) {
@@ -1920,14 +2168,11 @@ if (require.main === module) {
     process.exit(1);
   } else if (mcpStdio) {
     runMcpStdio();
+  } else if (mcpAutodetect && stdinIsPipe()) {
+    // No MCP choice made: an MCP client talking on stdin gets stdio MCP.
+    detectMcpStdio().then(mcp => (mcp ? runMcpStdio() : startWeb()));
   } else {
-    // The web UI (and /mcp when enabled); the browser opens except on a Pi or with --no-open.
-    server.listen(PORT, HOST, () => {
-      const url = `http://${HOST}:${PORT}`;
-      console.log(`pi-bay: ${url}`);
-      if (enableMcp) console.log(`mcp: ${url}/mcp`);
-      if (shouldOpenBrowser(noOpen, RASPBERRY_PI_HOST)) openBrowser(url);
-    });
+    startWeb();
   }
   // Ctrl-C and service stops close the SSH sessions first.
   process.on('SIGINT', shutdown);
@@ -1943,6 +2188,13 @@ module.exports = {
   dispatchMcp,
   handleMcpHttp,
   runMcpStdio,
+  stdinIsPipe,
+  isMcpLine,
+  detectMcpStdio,
+  listenOnFreePort,
+  openUi,
+  stopUi,
+  remoteUiUrl,
   MCP_TOOLS,
   selectMcpTransports,
   hostAllowed,
@@ -1958,6 +2210,8 @@ module.exports = {
     savedDevice,
     decorateDevice,
     setScanCache(cache) { scanCache = cache; },
+    setBrowserOpener(handler) { browserOpener = handler || (url => openBrowser(url)); },
+    setUiServerPort(port) { uiServerReady = port === null ? null : Promise.resolve({ port }); },
     clearMcpSessions() {
       for (const s of mcpSessions.values()) {
         try { s.client.end(); } catch {}

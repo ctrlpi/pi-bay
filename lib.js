@@ -268,6 +268,23 @@ function decodeMcpContent(content, encoding) {
   return Buffer.from(content, 'base64');
 }
 
+// A measured RAM size ("415MB RAM", what Linux reports after the GPU's share) as the board's
+// nominal size: the next of 256MB, 512MB, 1GB, 2GB... Anything else is returned as it is.
+function nominalRam(value) {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*(MB|GB)\b/i.exec(String(value || ''));
+  if (!match) return value || null;
+  const mb = Number(match[1]) * (/GB/i.test(match[2]) ? 1024 : 1);
+  if (!(mb > 0)) return value;
+  let size = 256;
+  while (size < mb) size *= 2;
+  return (size >= 1024 ? size / 1024 + 'GB' : size + 'MB') + ' RAM';
+}
+
+// A model without its revision, for telling whether two scans saw the same kind of board.
+function modelFamily(model) {
+  return String(model || '').replace(/\bRev\s+[0-9a-z.]+/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 // Fill RAM, flash, revision, chip, and clock for display, using the board family's typical values where unknown.
 function hardwareSpecs(d) {
   if (!d) return { ram: null, flash: null, revision: null, package: null, frequency: null };
@@ -313,21 +330,23 @@ function hardwareSpecs(d) {
       if (!pkg) pkg = 'Xtensa LX6';
     }
   } else if (type === 'Pi' || d.pi) {
+    // Models read "Pi 3 B Plus Rev 1.3", "Pi A Plus Rev 1.1", "Pi Zero 2 W Rev 1.0" ("Raspberry" and
+    // "Model" are removed); a first-generation board has no number: "Pi A ...", "Pi B ...".
+    const first = /\bPi\s*(1\s*)?(Model\s*)?[AB]\b/i.test(model);
+    const plus = /(\+|\bPlus\b)/i.test(model);
     if (!ram) {
-      if (/Zero\s*2\s*W/i.test(model)) ram = '512MB RAM';
-      else if (/Zero/i.test(model)) ram = '512MB RAM';
-      else if (/Model\s*A\b|1\s*A\b/i.test(model)) ram = '256MB RAM';
-      else if (/3\s*A\+/i.test(model)) ram = '512MB RAM';
-      else if (/3\s*B\b|3\s*B\+/i.test(model)) ram = '1GB RAM';
-      else if (/2\s*B\b/i.test(model)) ram = '1GB RAM';
+      if (/Zero/i.test(model)) ram = '512MB RAM';
+      else if (/\b3\s*A/i.test(model)) ram = '512MB RAM';
+      else if (/\b[23]\s*B/i.test(model)) ram = '1GB RAM';
+      else if (first) ram = /\bPi\s*(1\s*)?(Model\s*)?A\b/i.test(model) ? '256MB RAM' : '512MB RAM';
     }
     if (!frequency) {
       if (/Pi\s*5/i.test(model)) frequency = '2.4GHz';
       else if (/Pi\s*4/i.test(model)) frequency = '1.5GHz';
-      else if (/3\s*B\+/i.test(model)) frequency = '1.4GHz';
-      else if (/3\s*B\b/i.test(model)) frequency = '1.2GHz';
-      else if (/Zero\s*2/i.test(model)) frequency = '1.0GHz';
+      else if (/\b3\s*[AB]/i.test(model)) frequency = plus ? '1.4GHz' : '1.2GHz';
+      else if (/\b2\s*B/i.test(model)) frequency = '900MHz';
       else if (/Zero/i.test(model)) frequency = '1.0GHz';
+      else if (first) frequency = '700MHz';
     }
   }
 
@@ -349,6 +368,8 @@ module.exports = {
   cleanVersion,
   modelParts,
   hardwareSpecs,
+  nominalRam,
+  modelFamily,
   crc32,
   createZipBuffer,
   parseZipBuffer,

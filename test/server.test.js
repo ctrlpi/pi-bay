@@ -144,6 +144,9 @@ test('HTTP server endpoints and local functionality', async t => {
   await t.test('page includes the install popup, restore, and drag-and-drop hooks', async () => {
     const res = await request(baseUrl, '/');
     assert.equal(res.status, 200);
+    // The API key is not required: the default is shown in grey and used when the field is empty.
+    assert.ok(res.body.includes('<input id="ctrlpiKey" type="text" autocomplete="off" spellcheck="false" placeholder="your-secret-key">'));
+    assert.ok(res.body.includes("$('#ctrlpiKey').value.trim() || 'your-secret-key'"));
     for (const marker of ['id="ctrlpiForm"', 'id="menu-restore"', 'id="move-menu"', 'id="format-json"', 'id="run"', "addEventListener('drop'"]) {
       assert.ok(res.body.includes(marker), marker);
     }
@@ -206,3 +209,51 @@ test('savedDevice and decorateDevice isolation across IP reassignments', () => {
   assert.equal(cfgWithTaintedPi.devices['ba:fb:b3:00:a6:0c'].model, undefined);
 });
 
+
+test('saved RAM and SD stay with the board they were read from', () => {
+  const { decorateDevice } = _test;
+  const pi5 = { host: '10.0.0.9', mac: '', model: 'Pi 5 B Rev 1.1', ram: '2GB RAM', flash: '14G SD', hostname: 'pi5' };
+
+  // The same board, scanned again: its saved specs show, the measured RAM as the board size.
+  let cfg = { devices: { '10.0.0.9': { ...pi5, ram: '1900MB RAM' } } };
+  let shown = decorateDevice({ host: '10.0.0.9', mac: '', model: 'Pi 5 B Rev 1.1', pi: true, ssh: true }, cfg);
+  assert.deepEqual([shown.ram, shown.flash], ['2GB RAM', '14G SD']);
+
+  // Another board now has that address: nothing is carried over, and the saved entry is cleaned.
+  cfg = { devices: { '10.0.0.9': { ...pi5 } } };
+  shown = decorateDevice({ host: '10.0.0.9', mac: '', model: 'Pi Zero W Rev 1.1', pi: true, ssh: true }, cfg);
+  assert.deepEqual([shown.ram, shown.flash], [null, null]);
+  assert.deepEqual([cfg.devices['10.0.0.9'].model, cfg.devices['10.0.0.9'].ram, cfg.devices['10.0.0.9'].flash], ['Pi Zero W Rev 1.1', null, null]);
+
+  // A microcontroller is never signed in to: specs saved under it are a leftover, and are dropped.
+  cfg = { devices: { '10.0.0.9': { ...pi5, model: 'Generic ESP32S3 module with ESP32-S3' } } };
+  shown = decorateDevice({ host: '10.0.0.9', mac: '', model: 'Generic ESP32S3 module with ESP32-S3', ctrlpi: true }, cfg);
+  assert.deepEqual([shown.ram, shown.flash], [null, null]);
+  assert.deepEqual([cfg.devices['10.0.0.9'].ram, cfg.devices['10.0.0.9'].flash], [null, null]);
+});
+
+test('device name: agent name, then the scan hostname, then the hostname saved at sign-in', () => {
+  const { decorateDevice } = _test;
+  const cfg = { devices: { 'aa:bb:cc:dd:ee:01': { host: '10.0.0.5', mac: 'aa:bb:cc:dd:ee:01', hostname: 'b4' } } };
+  const base = { host: '10.0.0.5', mac: 'aa:bb:cc:dd:ee:01', ssh: true };
+
+  // The agent name stays the name; the scan hostname is reported beside it.
+  const agent = decorateDevice({ ...base, name: 'kitchen', hostname: 'b4.lan' }, cfg);
+  assert.equal(agent.name, 'kitchen');
+  assert.equal(agent.hostname, 'b4.lan');
+
+  // No scan hostname: the saved one is reported, and the agent name still wins.
+  const agentSaved = decorateDevice({ ...base, name: 'kitchen', hostname: null }, cfg);
+  assert.equal(agentSaved.name, 'kitchen');
+  assert.equal(agentSaved.hostname, 'b4');
+
+  // No name from the scan at all: the saved hostname becomes the name.
+  const unnamed = decorateDevice({ ...base, name: '-', hostname: null }, cfg);
+  assert.equal(unnamed.name, 'b4');
+  assert.equal(unnamed.hostname, 'b4');
+
+  // Nothing known anywhere.
+  const unknown = decorateDevice({ host: '10.0.0.9', mac: '', name: '-', hostname: null }, { devices: {} });
+  assert.equal(unknown.name, '-');
+  assert.equal(unknown.hostname, null);
+});

@@ -1,10 +1,10 @@
 # Pi Bay
 
 [![Platform: Cross-Platform](https://img.shields.io/badge/platform-Cross--Platform-006400.svg)](#quick-start)
-[![Version 0.9.34](https://img.shields.io/badge/version-0.9.34-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
+[![Version 0.9.40](https://img.shields.io/badge/version-0.9.40-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-blue.svg)](https://nodejs.org/)
 [![Protocol: MCP](https://img.shields.io/badge/protocol-MCP-006400.svg)](#mcp-server)
-[![Tools: 12](https://img.shields.io/badge/tools-12-006400.svg)](#mcp-tools)
+[![Tools: 13](https://img.shields.io/badge/tools-13-006400.svg)](#mcp-tools)
 [![License: MIT](https://img.shields.io/badge/license-MIT-188038.svg)](https://github.com/ctrlpi/pi-bay/blob/main/LICENSE)
 ![Status: Beta](https://img.shields.io/badge/status-Beta-red.svg)
 [![Build Status](https://github.com/ctrlpi/pi-bay/actions/workflows/ci.yml/badge.svg)](https://github.com/ctrlpi/pi-bay/actions)
@@ -16,7 +16,7 @@
 Requires Node.js 20 or newer and SSH enabled on the target device.
 
 ```sh
-npx @ctrlpi/pi-bay
+npx pi-bay
 ```
 
 Your browser will open automatically! If it doesn't, head to [http://localhost:8383](http://localhost:8383).
@@ -53,14 +53,14 @@ pi-bay includes a dependency-free [Model Context Protocol](https://modelcontextp
 
 ### Agent configuration
 
-In Claude Desktop, open **Settings → Developer → Edit Config** to get to the configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or the equivalent file on Windows or Linux), and add the server under `mcpServers` enabling stdio:
+In Claude Desktop, open **Settings → Developer → Edit Config** to get to the configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or the equivalent file on Windows or Linux), and add the server under `mcpServers`. `--mcp-stdio` is optional here: pi-bay detects an MCP client on stdin and starts stdio on its own.
 
 ```json
 {
   "mcpServers": {
     "pi-bay": {
       "command": "npx",
-      "args": ["-y", "@ctrlpi/pi-bay", "--mcp-stdio"]
+      "args": ["-y", "pi-bay", "--mcp-stdio"]
     }
   }
 }
@@ -73,7 +73,7 @@ Cursor takes the same JSON, here and under Streamable HTTP. Put it in `~/.cursor
 Use HTTP when the MCP client runs on another computer or Raspberry Pi:
 
 ```sh
-npx @ctrlpi/pi-bay --mcp-http
+npx pi-bay --mcp-http
 ```
 
 The normal web interface remains available and MCP is served at `http://HOST:8383/mcp`. Configure the MCP agent to connect over HTTP, replacing `PI_HOST_ADDR` with the platform running pi-bay:
@@ -120,12 +120,13 @@ When neither works, the tool asks the agent to call `pi_device_authenticate` fir
 | `pi_path_delete` | Permanently delete a file or recursively delete a folder relative to `$HOME`. |
 | `pi_device_reboot` | Reboot the device. |
 | `pi_ctrlpi_install` | Install or update the ctrlPi API (pi-gpio-api), and start its service when sudo needs no password. |
+| `pi_ui` | Open the web UI in the browser, or return its address when pi-bay runs on another computer. `action: "stop"` stops it. |
 
 Call `pi_devices_list` first, then pass its `device_id` to device-specific tools.
 
 ## Installing the ctrlPi API
 
-**Install ctrlPi API** in the top-right menu installs [`pi-gpio-api`](https://github.com/ctrlpi/pi-gpio-api) on the connected Pi. A popup asks for the agent name, the API key, and the **Lite** (recommended) or **Full** package. pi-bay writes `~/pi-gpio-api/config.json` with the name and key, then runs the installer in the **Terminal** tab so you can follow it.
+**Install ctrlPi API** in the top-right menu installs [`pi-gpio-api`](https://github.com/ctrlpi/pi-gpio-api) on the connected Pi. A popup asks for the agent name, the API key, and the **Lite** (recommended) or **Full** package. The API key is optional: left empty, it is the default `your-secret-key`, which is public, so change it before relying on the agent. pi-bay writes `~/pi-gpio-api/config.json` with the name and key, then runs the installer in the **Terminal** tab so you can follow it.
 
 If the Pi already has `~/pi-gpio-api/config.json`, its agent name and API key are kept and the installer updates pi-gpio-api in place. The installer ends with the `sudo` commands that create and start the `pi-gpio-api` service, or restart it; run them in the same terminal.
 
@@ -174,7 +175,7 @@ npm start
 Or install the npm package locally:
 
 ```bash
-npm install @ctrlpi/pi-bay
+npm install pi-bay
 npx pi-bay
 ```
 
@@ -198,7 +199,7 @@ pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--a
       <td width="20%"><code>--port</code></td>
       <td width="20%"><code>PORT</code></td>
       <td width="13%"><code>8383</code></td>
-      <td width="47%">Web server port.</td>
+      <td width="47%">Web server port. When the default is busy on a desktop, one of the next 3 is used.</td>
     </tr>
     <tr>
       <td width="20%"><code>--host</code></td>
@@ -240,7 +241,7 @@ pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--a
       <td width="20%"><code>--mcp-stdio</code></td>
       <td width="20%"><code>PI_BAY_MCP_STDIO</code></td>
       <td width="13%"><code>false</code></td>
-      <td width="47%">Run only the MCP stdio transport. No web server or browser is started.</td>
+      <td width="47%">Run only the MCP stdio transport. Optional when an MCP client starts pi-bay: it is detected automatically.</td>
     </tr>
     <tr>
       <td width="20%"><code>--mcp-http</code></td>
@@ -282,7 +283,7 @@ Only expose pi-bay on a trusted network. It has no login of its own and can run 
 ## How discovery works
 
 - The scan covers the `/24` network of the address the computer uses to reach other networks (offline, its first active IPv4 interface) and checks SSH on port 22 (`--ssh-port`) and a ctrlPi agent's `/hello` on port 8314 (`--api-port`).
-- Names come from ctrlPi, reverse DNS, and on macOS from Bonjour and SMB/NetBIOS.
+- Names come from ctrlPi, reverse DNS, on macOS from Bonjour and SMB/NetBIOS, and last from the device's hostname once you sign in.
 - A device is verified as a Raspberry Pi by its MAC vendor or a `raspberrypi` hostname. A ctrlPi agent without SSH is shown as an ESP32 when its model or name says so, and as a Pico otherwise. Other SSH hosts are marked unverified.
 - For a ctrlPi agent, pi-bay reads `/config/read` with the configured API key: the model (`agent.platform`), operating system (`agent.os`) and version (`agent.version`). Live scan information is preferred; a previously saved model is used when the device does not return one. After SSH login, pi-bay also reads the Raspberry Pi model from Linux and saves it for future scans.
 
