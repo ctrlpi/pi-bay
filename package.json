@@ -1,6 +1,6 @@
 {
   "name": "pi-bay",
-  "version": "0.9.40",
+  "version": "0.9.41",
   "mcpName": "io.github.ctrlpi/pi-bay",
   "description": "An App and MCP Server for managing Raspberry Pis and other SSH devices on a LAN: find them, browse and edit their files, and run commands in an SSH terminal.",
   "keywords": [
@@ -22,7 +22,7 @@
     "type": "git",
     "url": "git+https://github.com/ctrlpi/pi-bay.git"
   },
-  "homepage": "https://ctrlpi.com",
+  "homepage": "https://ctrlpi.com/pi-bay",
   "bugs": {
     "url": "https://github.com/ctrlpi/pi-bay/issues"
   },
