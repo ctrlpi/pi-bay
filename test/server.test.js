@@ -51,10 +51,10 @@ test('HTTP server endpoints and local functionality', async t => {
   });
 
   await t.test('answers only requests addressed to an allowed host (DNS rebinding)', async () => {
-    const foreign = await request(baseUrl, '/api/devices', { headers: { Host: 'attacker.example:8383' } });
+    const foreign = await request(baseUrl, '/api/devices', { headers: { Host: 'attacker.example:3141' } });
     assert.equal(foreign.status, 403);
     assert.match(foreign.json().error, /Host not allowed: attacker\.example\. .*--allow-host attacker\.example/);
-    const local = await request(baseUrl, '/', { headers: { Host: 'localhost:8383' } });
+    const local = await request(baseUrl, '/', { headers: { Host: 'localhost:3141' } });
     assert.equal(local.status, 200);
   });
 
@@ -66,7 +66,7 @@ test('HTTP server endpoints and local functionality', async t => {
   });
 
   await t.test('hostAllowed accepts IPs, localhost, the machine name and --allow-host names', () => {
-    for (const host of ['127.0.0.1:8383', '192.168.1.20', '[::1]:8383', 'localhost:8383', 'labmac', 'LabMac.local:8383', 'pi4.lan'])
+    for (const host of ['127.0.0.1:3141', '192.168.1.20', '[::1]:3141', 'localhost:3141', 'labmac', 'LabMac.local:3141', 'pi4.lan'])
       assert.equal(hostAllowed(host, ['pi4.lan'], 'labmac.local'), true, host);
     for (const host of ['attacker.example', 'labmac.evil.com', '', 'pi4.lan:x'])
       assert.equal(hostAllowed(host, ['pi4.lan'], 'labmac.local'), false, host);

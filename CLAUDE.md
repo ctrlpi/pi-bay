@@ -24,23 +24,24 @@ This repository lives at `pi-bay/` inside the ctrlpi workspace folder, next to t
 npm start
 npm run dev
 npm test
-node server.js [--port 8383] [--host 127.0.0.1] [--ssh-port 22] [--api-port 8314] [--no-open] [--no-mcp]
-node server.js --mcp-stdio
-node server.js --mcp-http
+node server.js [--port 3141] [--host 127.0.0.1] [--ssh-port 22] [--api-port 8314] [--no-open] [--ui on|off] [--mcp off|http|stdio]
+node server.js --mcp stdio
+node server.js --mcp http
+node server.js --ui off
 node server.js --help
 node server.js --version
 ```
 
 Configuration precedence is command line, environment, then default:
 
-- Port: `--port`, `PORT`, `8383`. On a busy port (`listenOnFreePort()`) a pi-bay already running there is opened in the browser and no second copy starts. When another program holds it, the next 3 ports are tried, only for the default port on a desktop without HTTP MCP; otherwise it fails with a port-in-use message.
+- Port: `--port`, `PORT`, `3141`. On a busy port (`listenOnFreePort()`) a pi-bay already running there is opened in the browser and no second copy starts. When another program holds it, the next 3 ports are tried, only for the default port on a desktop without HTTP MCP; otherwise it fails with a port-in-use message.
 - Host: `--host`, `PI_BAY_HOST`, then `127.0.0.1`; Raspberry Pi hosts default to `0.0.0.0`.
 - Allowed host names: `--allow-host` (repeatable or comma-separated) plus `PI_BAY_ALLOW_HOSTS`. `hostAllowed()` checks the `Host` header on every route, `/mcp` and the `/terminal` WebSocket included, against DNS rebinding: IP addresses, `localhost`, `os.hostname()` (with or without `.local`), the `--host` value and these names pass, anything else gets `403`.
 - SSH Port: `--ssh-port`, `22`.
 - ctrlPi API Port: `--api-port`, `8314`.
 - ctrlPi API Key: `--api-key`, `your-secret-key`.
 - Browser launch: `--no-open` or `PI_BAY_NO_OPEN`; Raspberry Pi hosts never open a browser.
-- MCP: `--mcp-stdio`/`PI_BAY_MCP_STDIO` or `--mcp-http`/`PI_BAY_MCP_HTTP`. Raspberry Pi hosts enable HTTP MCP by default; `--no-mcp`/`PI_BAY_NO_MCP` disables all MCP transports. With none of these set and stdin a pipe or socket, `detectMcpStdio()` reads the first line: a JSON-RPC message starts stdio MCP; anything else, a closed stdin or 2 seconds of silence starts the web app.
+- Mode: `--ui on|off` (`PI_BAY_UI`) and `--mcp off|http|stdio` (`PI_BAY_MCP`), parsed by `parseMode()`; a flag wins over its variable, and the old flags (`--mcp-stdio`, `--mcp-http`, `--mcp-only`, `--no-mcp`) and variables are ignored. `--ui off` alone means `--mcp http`; `--mcp stdio` means no web UI. `--ui off --mcp off`, `--ui on --mcp stdio` and a bad value exit with code 2. Raspberry Pi hosts enable HTTP MCP by default (`--mcp off` disables it). With neither `--ui` nor `--mcp` set (and no variable) and stdin a pipe or socket, `detectMcpStdio()` reads the first line: a JSON-RPC message starts stdio MCP; anything else, a closed stdin or 2 seconds of silence starts the web app. A web start logs `ui: on|off, mcp: off|http (key set: yes|no)`.
 
 Boolean environment values accept `true`, `false`, `1`, or `0`.
 
@@ -66,6 +67,13 @@ Important HTTP routes include:
 - `/api/readme`: Full README content.
 - `/api/mcp`: Runtime toggle for HTTP MCP (`POST /api/mcp?enabled=0|1`).
 - `/mcp`: Streamable HTTP MCP endpoint when enabled.
+- `/hello` and `/remote-config` (always served, for `ctrlpi-remote`): see "HTTP MCP key" below.
+
+### HTTP MCP key
+
+`POST /mcp` needs `Api-Key`. The key is `mcp.api_key` (with `mcp.key_set`) in `~/.ctrlpi/pi-bay-config.json` (`MCP_CONFIG_PATH`; `--config <folder>` holds it and `pi-bay-devices.json`, a `.json` path is the key file with the devices file beside it, `resolveConfigFiles()`; a `--config` without a value exits with code 2), re-read on every request. The default `your-mcp-key` is accepted until the first different key (1-128 printable ASCII characters) claims it and is saved (`mcpKeyAccepted()`, trust on first use, not adopted when the file cannot be written); wrong or missing gets `403` and a `[SECURITY]` log line. `GET /hello` (no key) answers `{"service": "pi-bay", "key": <true once a key is set>}`. `POST /remote-config` with the current key and `{"api_key": "<new>"}` changes it: `200 {key_set}`, `403` (wrong key or foreign `Origin`), `400` (empty, the default, over 128 or not printable), `405`, `413` (over 4 KB), `500` (not saved); it never claims a key. Stdio MCP needs no key. Recovery: remove `mcp.api_key` from the file and the default works again. The web UI and its `/api/*` routes have no key.
+
+`--ui off` implies HTTP MCP, never opens a browser, and serves only `/mcp`, `/hello` and `/remote-config`: everything else, the page and `/api/mcp` included, is a `404`, and `pi_ui` refuses with a tool error. With `--mcp off` it exits with code 2.
 
 ## Frontend
 
@@ -73,6 +81,7 @@ Important HTTP routes include:
 
 - **Drag and drop** on `#files`: OS files and folders (walked with `webkitGetAsEntry`) upload into the folder row they are dropped on, the dropped-on file's folder, or `$HOME`. Dragging a row onto a folder moves it through `/api/rename`; dragging a file out sets `DownloadURL` for a desktop download. `movePathTo()` is the single move/rename path and fixes up `allFiles`, `loadedDirs`, `expandedDirs`, and the open file.
 - **Install ctrlPi API** opens a popup (agent name, API key, Lite/Full). It writes `~/pi-gpio-api/config.json` over SFTP when the Pi has none, so `install.sh` skips its own prompts, then types `curl ... install.sh | bash -s -- --lite|--full` into the Terminal tab through `sendToTerminal()`. The key never goes through the shell. The API key is not required: the field shows `your-secret-key` in grey, an empty field writes that default, and the popup's hint says it is public.
+- **Server connection**: every request goes through `serverFetch()`, and `GET /api/mcp` every 3 s notices a stopped server while the page is idle (it answers with MCP on or off). A red banner shows and the device menu is disabled until it answers again; then a "Reconnected" toast, a scan that failed runs again, and a session the restart lost (`/api/files` answers `Not connected`) returns to the devices and the sign-in box.
 - **Run** sends `cd <folder> && python3|./<file>|node <file>` to the Terminal tab. **Format JSON** reformats with 3-space indentation while editing. **Restore from ZIP** posts to `/api/restore`.
 
 ## Model Context Protocol (MCP)
@@ -81,8 +90,8 @@ Important HTTP routes include:
 
 ### Transports
 
-- **Stdio (`--mcp-stdio`, or detected on stdin)**: For Claude Desktop, Cursor, or local agents. Standard output is reserved strictly for JSON-RPC messages; informational logs are redirected to standard error.
-- **HTTP (`--mcp-http`)**: Serves MCP over Streamable HTTP at `/mcp` alongside the web interface. Enabled by default on Raspberry Pi hosts.
+- **Stdio (`--mcp stdio`, or detected on stdin)**: For Claude Desktop, Cursor, or local agents. Standard output is reserved strictly for JSON-RPC messages; informational logs are redirected to standard error.
+- **HTTP (`--mcp http`)**: Serves MCP over Streamable HTTP at `/mcp` alongside the web interface. Enabled by default on Raspberry Pi hosts.
 
 ### Tools
 
@@ -103,7 +112,8 @@ Important HTTP routes include:
 ### Security and Sandboxing
 
 - Remote file paths are constrained to `$HOME` and path traversal (`..`) is rejected.
-- All state-mutating HTTP API requests require same-origin access.
+- All state-mutating HTTP API requests require same-origin access, the `/api/mcp` switch included (it sits below that check).
+- HTTP MCP needs its key (see "HTTP MCP key"); the web UI and `/api/*` have none, so `--ui off` is the way to expose only MCP on a LAN.
 - Cross-origin MCP requests over HTTP are validated against origin headers.
 
 ## Testing
@@ -117,4 +127,5 @@ npm test
 The test suite covers:
 - `test/lib.test.js`: MAC normalization, path sandboxing, CRC32, ZIP archives and ZIP restore parsing, Pi host detection, transport selection, text/binary heuristics, and content decoding.
 - `test/server.test.js`: Static assets and UI hooks, README endpoints, session authentication protections (including upload and restore), cross-origin rejections, and device name and hostname order.
+- `test/page.test.js`: the page's server connection handling (banner, menu, reconnect, rescan, lost session), run in a VM from the `// ── Server Connection ──` block of `page.html`.
 - `test/mcp.test.js`: Protocol discovery, legacy initialization, tool schemas, path traversal security, HTTP `/mcp` routes, origin checks, `/api/mcp` toggle, stdio execution and detection, `pi_ui`, and busy ports.

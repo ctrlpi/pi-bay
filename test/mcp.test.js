@@ -14,6 +14,7 @@ const {
   server,
   dispatchMcp,
   setMcpHttp,
+  setMcpOnly,
   MCP_TOOLS,
   resolveDevice,
   mcpSessions,
@@ -316,7 +317,8 @@ test('HTTP MCP endpoint (/mcp)', async t => {
       headers: {
         'Content-Type': 'application/json',
         'MCP-Protocol-Version': '2026-07-28',
-        'Mcp-Method': 'server/discover'
+        'Mcp-Method': 'server/discover',
+        'Api-Key': 'your-mcp-key'
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -334,6 +336,11 @@ test('HTTP MCP endpoint (/mcp)', async t => {
     const dis = await httpReq('/api/mcp?enabled=0', { method: 'POST' });
     assert.equal(dis.status, 200);
     assert.equal(dis.json().enabled, false);
+
+    // GET still answers with MCP off: the page's server check polls it.
+    const get = await httpReq('/api/mcp');
+    assert.equal(get.status, 200);
+    assert.equal(get.json().enabled, false);
 
     // Request to /mcp when disabled returns 404
     const off = await httpReq('/mcp', {
@@ -368,7 +375,7 @@ test('HTTP MCP endpoint (/mcp)', async t => {
   await t.test('rejects parse errors with 400', async () => {
     const res = await httpReq('/mcp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Api-Key': 'your-mcp-key' },
       body: 'not a valid json {'
     });
     assert.equal(res.status, 400);
@@ -378,7 +385,7 @@ test('HTTP MCP endpoint (/mcp)', async t => {
   await t.test('serves legacy MCP over HTTP', async () => {
     const res = await httpReq('/mcp', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Api-Key': 'your-mcp-key' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 103,
@@ -391,6 +398,140 @@ test('HTTP MCP endpoint (/mcp)', async t => {
     assert.equal(data.id, 103);
     assert.equal(data.result.serverInfo.name, 'pi-bay');
   });
+
+  const configFile = path.join(testHome, '.ctrlpi', 'pi-bay-config.json');
+  const ping = { jsonrpc: '2.0', id: 1, method: 'ping' };
+  const mcp = (key, body = ping) => httpReq('/mcp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(key === undefined ? {} : { 'Api-Key': key }) },
+    body: JSON.stringify(body)
+  });
+  const remoteConfig = (key, body, headers = {}) => httpReq('/remote-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(key === undefined ? {} : { 'Api-Key': key }), ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body)
+  });
+
+  await t.test('refuses a cross-origin /api/mcp toggle', async () => {
+    const res = await httpReq('/api/mcp?enabled=0', { method: 'POST', headers: { Origin: 'http://evil.example' } });
+    assert.equal(res.status, 403);
+    assert.equal((await httpReq('/api/mcp')).json().enabled, true);
+  });
+
+  await t.test('/hello answers without a key, and only GET', async () => {
+    const res = await httpReq('/hello');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json(), { service: 'pi-bay', key: false });
+    assert.equal((await httpReq('/hello', { method: 'POST' })).status, 405);
+    assert.equal(fs.existsSync(configFile), false, '/hello never claims a key');
+  });
+
+  await t.test('/mcp needs the key, and the first different key claims it', async () => {
+    assert.equal((await mcp()).status, 403);
+    assert.equal((await mcp('your-mcp-key')).status, 200);
+    assert.equal(fs.existsSync(configFile), false, 'the default key claims nothing');
+    assert.equal((await remoteConfig('grab', { api_key: 'other' })).status, 403, '/remote-config never claims');
+    assert.equal((await mcp('first-key')).status, 200);
+    const saved = JSON.parse(fs.readFileSync(configFile, 'utf8')).mcp;
+    assert.equal(saved.api_key, 'first-key');
+    assert.match(saved.key_set, /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(configFile).mode & 0o777, 0o600);
+    assert.deepEqual((await httpReq('/hello')).json(), { service: 'pi-bay', key: true });
+    assert.equal((await mcp('your-mcp-key')).status, 403);
+    assert.equal((await mcp('second-key')).status, 403);
+    assert.equal((await mcp('first-key')).status, 200);
+  });
+
+  await t.test('/remote-config changes the key with the current one', async () => {
+    assert.equal((await remoteConfig('wrong', { api_key: 'new-key' })).status, 403);
+    assert.equal((await remoteConfig(undefined, { api_key: 'new-key' })).status, 403);
+    assert.equal((await remoteConfig('first-key', { api_key: 'new-key' }, { Origin: 'https://evil.example' })).status, 403);
+    for (const body of [{}, { api_key: '' }, { api_key: 'your-mcp-key' }, { api_key: 'has space' }, { api_key: 'x'.repeat(129) }, { api_key: 42 }, 'not json']) {
+      assert.equal((await remoteConfig('first-key', body)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await httpReq('/remote-config', { headers: { 'Api-Key': 'first-key' } })).status, 405);
+    const changed = await remoteConfig('first-key', { api_key: 'new-key' });
+    assert.equal(changed.status, 200);
+    assert.match(changed.json().key_set, /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+    assert.equal((await mcp('first-key')).status, 403);
+    assert.equal((await mcp('new-key')).status, 200);
+  });
+
+  await t.test('--ui off serves only /mcp, /hello and /remote-config, and pi_ui refuses', async () => {
+    setMcpOnly(true);
+    setMcpHttp(false);
+    try {
+      assert.equal((await mcp('new-key')).status, 200, '/mcp answers even with the toggle off');
+      assert.equal((await httpReq('/hello')).status, 200);
+      for (const route of ['/', '/api/devices', '/api/readme', '/favicon.ico', '/api/mcp']) {
+        assert.equal((await httpReq(route)).status, 404, route);
+      }
+      assert.equal((await httpReq('/api/mcp?enabled=1', { method: 'POST' })).status, 404);
+      const ui = (await mcp('new-key', {
+        jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'pi_ui', arguments: {} }
+      })).json();
+      assert.equal(ui.result.isError, true);
+      assert.match(ui.result.content[0].text, /--ui off/);
+    } finally {
+      setMcpOnly(false);
+      setMcpHttp(true);
+    }
+  });
+});
+
+test('--config takes a folder or the .json file itself, and needs a value', () => {
+  const { spawnSync } = require('node:child_process');
+  assert.deepEqual(app.resolveConfigFiles('/x/y'), { own: path.resolve('/x/y/pi-bay-config.json'), devices: path.resolve('/x/y/pi-bay-devices.json') });
+  assert.deepEqual(app.resolveConfigFiles('/x/mine.json'), { own: path.resolve('/x/mine.json'), devices: path.resolve('/x/pi-bay-devices.json') });
+  assert.deepEqual(app.resolveConfigFiles(null), { own: path.join(os.homedir(), '.ctrlpi', 'pi-bay-config.json'), devices: path.join(os.homedir(), '.ctrlpi', 'pi-bay-devices.json') });
+  for (const args of [['--config'], ['--config', '--no-open']]) {
+    const run = spawnSync(process.execPath, [path.join(__dirname, '..', 'server.js'), ...args], {
+      env: { ...process.env, HOME: testHome }, encoding: 'utf8', timeout: 10000
+    });
+    assert.equal(run.status, 2, args.join(' '));
+    assert.match(run.stderr, /--config needs/);
+  }
+});
+
+test('--config moves the key file: a claim lands there, not in ~/.ctrlpi', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-bay-config-'));
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--ui', 'off', '--port', '0', '--config', dir], {
+    env: { ...process.env, HOME: testHome, PI_BAY_NO_OPEN: '1' }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  try {
+    let out = '';
+    const port = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('pi-bay did not start: ' + out)), 10000);
+      child.stdout.on('data', d => {
+        out += d;
+        const m = /pi-bay: http:\/\/[^:]+:(\d+)/.exec(out);
+        if (m) { clearTimeout(timer); resolve(Number(m[1])); }
+      });
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Api-Key': 'config-key' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })
+    });
+    assert.equal(res.status, 200);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'pi-bay-config.json'), 'utf8')).mcp.api_key, 'config-key');
+    assert.equal(fs.existsSync(path.join(testHome, '.ctrlpi', 'pi-bay-config.json')) &&
+      JSON.parse(fs.readFileSync(path.join(testHome, '.ctrlpi', 'pi-bay-config.json'), 'utf8')).mcp.api_key === 'config-key', false);
+  } finally {
+    child.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--ui off with --mcp off, or --ui on with --mcp stdio, exits with code 2', () => {
+  const { spawnSync } = require('node:child_process');
+  for (const flags of [['--ui', 'off', '--mcp', 'off'], ['--ui', 'on', '--mcp', 'stdio'], ['--mcp', 'bogus']]) {
+    const run = spawnSync(process.execPath, [path.join(__dirname, '..', 'server.js'), ...flags], {
+      env: { ...process.env, HOME: testHome }, encoding: 'utf8', timeout: 10000
+    });
+    assert.equal(run.status, 2, flags.join(' '));
+    assert.match(run.stderr, /--ui|--mcp/);
+  }
 });
 
 // Resolves when the child exits; a child still running after 20 s is killed and the test fails
@@ -407,7 +548,7 @@ function childExit(child, output, event = 'exit') {
 }
 
 test('MCP stdio child process', async () => {
-  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp-stdio'], {
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp', 'stdio'], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
@@ -445,9 +586,8 @@ test('MCP stdio child process', async () => {
 
 test('MCP stdio starts without a flag when an MCP client talks on stdin', async () => {
   const env = { ...process.env, PI_BAY_NO_OPEN: '1' };
-  delete env.PI_BAY_MCP_STDIO;
-  delete env.PI_BAY_MCP_HTTP;
-  delete env.PI_BAY_NO_MCP;
+  delete env.PI_BAY_UI;
+  delete env.PI_BAY_MCP;
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
     env, stdio: ['pipe', 'pipe', 'pipe']
   });
@@ -532,8 +672,8 @@ test('pi_ui', async (t) => {
     opened = [];
     const pi = { raspberryPiHost: true, noOpen: false };
     // HTTP MCP: the host the client reached.
-    const overHttp = await app.openUi({ host: 'b4.local:8383' }, { ...pi, env: {} });
-    assert.equal(overHttp.url, 'http://b4.local:8383');
+    const overHttp = await app.openUi({ host: 'b4.local:3141' }, { ...pi, env: {} });
+    assert.equal(overHttp.url, 'http://b4.local:3141');
     assert.equal(overHttp.opened, false);
     // stdio over ssh: the address the session came in on.
     const overSsh = await app.openUi({}, { ...pi, env: { SSH_CONNECTION: '192.168.1.5 50000 192.168.1.44 22' } });
@@ -542,8 +682,8 @@ test('pi_ui', async (t) => {
     const desktop = { raspberryPiHost: false, noOpen: false };
     assert.equal((await app.openUi({}, { ...desktop, env: { SSH_CONNECTION: 'fe80::1 5 fe80::2 22' } })).url,
       'http://[fe80::2]:7999');
-    assert.equal((await app.openUi({ host: '192.168.1.9:8383' }, { ...desktop, env: {} })).opened, false);
-    assert.equal((await app.openUi({ host: 'localhost:8383' }, { ...desktop, env: {} })).opened, true);
+    assert.equal((await app.openUi({ host: '192.168.1.9:3141' }, { ...desktop, env: {} })).opened, false);
+    assert.equal((await app.openUi({ host: 'localhost:3141' }, { ...desktop, env: {} })).opened, true);
     assert.equal(opened.length, 1);
   });
 
@@ -571,14 +711,14 @@ test('pi_ui', async (t) => {
     assert.equal(bad.result.isError, true);
     const reply = await app.dispatchMcp({
       jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'pi_ui', arguments: {} }
-    }, { host: '10.0.0.7:8383' });
-    assert.equal(reply.result.structuredContent.url, 'http://10.0.0.7:8383');
+    }, { host: '10.0.0.7:3141' });
+    assert.equal(reply.result.structuredContent.url, 'http://10.0.0.7:3141');
   });
 
   await t.test('serves the UI from a stdio MCP process', async () => {
     const env = { ...process.env };
     delete env.SSH_CONNECTION;
-    const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp-stdio', '--port', '0', '--no-open'], {
+    const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), '--mcp', 'stdio', '--port', '0', '--no-open'], {
       env, stdio: ['pipe', 'pipe', 'pipe']
     });
     try {
@@ -673,4 +813,24 @@ test('busy port', async (t) => {
       await close(other);
     }
   });
+});
+
+test('--ui and --mcp pick the mode, and old flags are ignored', () => {
+  const { parseMode } = require('../server.js');
+
+    const m = (argv, env = {}) => parseMode(argv, env);
+    assert.deepEqual([m([]).ui, m([]).mcp, m([]).given], [null, null, false]);
+    assert.deepEqual([m(['--ui', 'off']).mcp, m(['--ui', 'off']).uiOff], ['http', true]);
+    assert.equal(m(['--mcp', 'stdio']).ui, null);
+    assert.equal(m(['--mcp', 'http']).given, true);
+    assert.equal(m(['--ui', 'on']).given, true);
+    assert.equal(m([], { PI_BAY_MCP: 'off' }).mcp, 'off');
+    assert.equal(m(['--mcp', 'http'], { PI_BAY_MCP: 'off' }).mcp, 'http');
+    assert.ok(m(['--ui', 'off', '--mcp', 'off']).error);
+    assert.ok(m(['--ui', 'on', '--mcp', 'stdio']).error);
+    assert.ok(m(['--mcp', 'bogus']).error);
+    assert.ok(m(['--ui']).error);
+    for (const old of ['--mcp-only', '--mcp-http', '--mcp-stdio', '--no-mcp']) {
+      assert.equal(m([old]).given, false, old);
+    }
 });

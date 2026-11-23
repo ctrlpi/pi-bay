@@ -45,38 +45,142 @@ Options:
   --api-port PORT     ctrlPi API port (default 8314)
   --api-key KEY       ctrlPi API key
   --no-open           Do not open a browser
-  --mcp-stdio         Run MCP over stdio (automatic when an MCP client starts pi-bay)
-  --mcp-http          Enable MCP over HTTP
-  --no-mcp            Disable MCP
+  --ui on|off         Serve the web UI and its API (default on)
+  --mcp off|http|stdio  MCP transport (default: http on a Raspberry Pi, otherwise off,
+                      or stdio when an MCP client starts pi-bay with no --ui or --mcp)
+                      --ui off serves only /mcp, /hello and /remote-config (http MCP);
+                      --mcp stdio has no web UI
+  --config PATH       Config folder, or the pi-bay-config.json file itself (default ~/.ctrlpi)
   --help              Show this help
   --version           Show the version`);
   process.exit(0);
 }
 
-// MCP transport flags from the command line.
-const cliMcpStdio = args.includes('--mcp-stdio');
-const cliMcpHttp = args.includes('--mcp-http');
-const cliNoMcp = args.includes('--no-mcp') || envEnabled(process.env.PI_BAY_NO_MCP);
 
-// A Raspberry Pi host turns on HTTP MCP by default; flags and environment can override it.
+// --ui on|off and --mcp off|http|stdio (or PI_BAY_UI and PI_BAY_MCP); a flag wins over its variable.
+// --ui off alone means HTTP MCP, and stdio MCP means no web UI. With neither set, the host's
+// defaults apply and a piped stdin is checked for an MCP client. A bad value or a pair that
+// leaves nothing to serve comes back as `error`.
+function parseMode(argv, env) {
+  let ui = null;
+  let mcp = null;
+  let error = null;
+  const value = (i, name, allowed) => {
+    const v = String(argv[i + 1] || '').toLowerCase();
+    if (!allowed.includes(v)) error = error || name + ' takes ' + allowed.join(', ');
+    return allowed.includes(v) ? v : null;
+  };
+  const fromEnv = (v, name, allowed) => {
+    if (v === undefined || v === '') return null;
+    const low = String(v).toLowerCase();
+    if (allowed.includes(low)) return low;
+    error = error || name + ' takes ' + allowed.join(', ');
+    return null;
+  };
+  ui = fromEnv(env.PI_BAY_UI, 'PI_BAY_UI', ['on', 'off']);
+  mcp = fromEnv(env.PI_BAY_MCP, 'PI_BAY_MCP', ['off', 'http', 'stdio']);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--ui') ui = value(i, '--ui', ['on', 'off']) || ui;
+    else if (argv[i] === '--mcp') mcp = value(i, '--mcp', ['off', 'http', 'stdio']) || mcp;
+  }
+  const given = ui !== null || mcp !== null;
+  if (ui === 'off' && mcp === null) mcp = 'http';
+  if (ui === 'off' && mcp === 'off') error = error || 'Nothing to serve: --ui off needs --mcp http';
+  if (ui === 'off' && mcp === 'stdio') ui = null;
+  if (ui === 'on' && mcp === 'stdio') error = error || '--mcp stdio has no web UI: do not combine it with --ui on';
+  return { ui, mcp, given, error, uiOff: ui === 'off' };
+}
+
+const mode = parseMode(args, process.env);
+const cliMcpStdio = mode.mcp === 'stdio';
+const cliMcpHttp = mode.mcp === 'http';
+const cliNoMcp = mode.mcp === 'off';
+// --ui off: HTTP MCP on, and only /mcp, /hello and /remote-config answer.
+let mcpOnly = mode.uiOff;
+
+// A Raspberry Pi host turns on HTTP MCP by default; --mcp overrides it.
 const RASPBERRY_PI_HOST = isRaspberryPi();
 const selectedMcp = selectMcpTransports({
   raspberryPiHost: RASPBERRY_PI_HOST,
   noMcp: cliNoMcp,
   cliStdio: cliMcpStdio,
-  cliHttp: cliMcpHttp,
-  envStdio: process.env.PI_BAY_MCP_STDIO,
-  envHttp: process.env.PI_BAY_MCP_HTTP
+  cliHttp: cliMcpHttp
 });
 const mcpStdio = selectedMcp.stdio;
 let enableMcp = selectedMcp.http;
-// With no MCP flag or variable at all, a piped stdin is checked for an MCP client.
-const mcpAutodetect = !cliNoMcp && !cliMcpStdio && !cliMcpHttp &&
-  process.env.PI_BAY_MCP_STDIO === undefined && process.env.PI_BAY_MCP_HTTP === undefined;
-// --no-mcp together with an MCP transport flag is refused at startup.
-const conflictingMcpFlags = cliNoMcp && (cliMcpStdio || cliMcpHttp);
+// With no --ui or --mcp (and no variable), a piped stdin is checked for an MCP client.
+const mcpAutodetect = !mode.given;
 
-const PORT = Number(arg('--port', arg('-p', process.env.PORT || 8383)));
+// The HTTP MCP key, in ~/.ctrlpi/pi-bay-config.json as {mcp: {api_key, key_set}}.
+// Until a key is set the default is accepted, and the first different key a caller
+// sends to /mcp is claimed (trust on first use); POST /remote-config changes it.
+const DEFAULT_MCP_KEY = 'your-mcp-key';
+// --config <folder> holds pi-bay-config.json and pi-bay-devices.json; a .json path is the
+// key file itself, with pi-bay-devices.json beside it.
+function resolveConfigFiles(configPath) {
+  const dir = configPath ? path.resolve(configPath) : path.join(os.homedir(), '.ctrlpi');
+  if (configPath && dir.toLowerCase().endsWith('.json')) {
+    return { own: dir, devices: path.join(path.dirname(dir), 'pi-bay-devices.json') };
+  }
+  return { own: path.join(dir, 'pi-bay-config.json'), devices: path.join(dir, 'pi-bay-devices.json') };
+}
+const CONFIG_ARG = args.includes('--config') ? (arg('--config') ?? '') : null;
+const CONFIG_FILES = resolveConfigFiles(CONFIG_ARG);
+const MCP_CONFIG_PATH = CONFIG_FILES.own;
+// A new key: 1-128 printable ASCII characters, no spaces.
+const NEW_MCP_KEY = /^[\x21-\x7e]{1,128}$/;
+
+function loadOwnConfig() {
+  try {
+    const own = JSON.parse(fs.readFileSync(MCP_CONFIG_PATH, 'utf8'));
+    return own && typeof own === 'object' && !Array.isArray(own) ? own : {};
+  } catch { return {}; }
+}
+
+function mcpKey() {
+  const mcp = loadOwnConfig().mcp;
+  return (mcp && typeof mcp.api_key === 'string' && mcp.api_key) || DEFAULT_MCP_KEY;
+}
+
+// UTC 'YYYY-MM-DD HH:MM:SS'.
+function nowStamp(date = new Date()) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+// Saves a new key, readable by the user only; false when it could not be written (the old key stays).
+function saveMcpKey(key, keySet) {
+  const own = loadOwnConfig();
+  own.mcp = { ...(own.mcp && typeof own.mcp === 'object' ? own.mcp : {}), api_key: key, key_set: keySet };
+  try {
+    fs.mkdirSync(path.dirname(MCP_CONFIG_PATH), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(MCP_CONFIG_PATH, JSON.stringify(own, null, 4), { mode: 0o600 });
+    return true;
+  } catch (error) {
+    console.error('[SECURITY] Could not save the MCP key to ' + MCP_CONFIG_PATH + ' (' + error.message + '), the old key stays.');
+    return false;
+  }
+}
+
+// Constant-time comparison.
+function keysMatch(provided, expected) {
+  const a = Buffer.from(String(provided ?? ''), 'utf8');
+  const b = Buffer.from(String(expected ?? ''), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// The Api-Key check on /mcp, claiming the first different key while on the default.
+function mcpKeyAccepted(req) {
+  const expected = mcpKey();
+  const provided = String(req.headers['api-key'] ?? '');
+  if (expected === DEFAULT_MCP_KEY && provided && provided !== DEFAULT_MCP_KEY && NEW_MCP_KEY.test(provided)) {
+    if (!saveMcpKey(provided, nowStamp())) return false;
+    console.error('MCP Api-Key claimed by the first caller and saved to ' + MCP_CONFIG_PATH + '. Only that key is accepted now.');
+    return true;
+  }
+  return keysMatch(provided, expected);
+}
+
+const PORT = Number(arg('--port', arg('-p', process.env.PORT || 3141)));
 // How many ports after PORT are tried when another program holds it.
 const PORT_FALLBACKS = 3;
 const HOST = arg('--host', process.env.PI_BAY_HOST || (RASPBERRY_PI_HOST ? '0.0.0.0' : '127.0.0.1'));
@@ -106,7 +210,8 @@ function hostAllowed(hostHeader, extra = [], hostname = os.hostname()) {
 const SSH_PORT = Number(arg('--ssh-port', process.env.PI_BAY_SSH_PORT || '22'));
 const API_PORT = Number(arg('--api-port', process.env.PI_BAY_API_PORT || '8314'));
 const API_KEY = arg('--api-key', process.env.PI_BAY_API_KEY || 'your-secret-key');
-const noOpen = args.includes('--no-open') || envEnabled(process.env.PI_BAY_NO_OPEN);
+// --ui off never opens a browser.
+const noOpen = args.includes('--no-open') || envEnabled(process.env.PI_BAY_NO_OPEN) || mcpOnly;
 
 // Opens a URL in the default browser.
 function openBrowser(url) {
@@ -119,8 +224,8 @@ function openBrowser(url) {
     execFile('xdg-open', [url], () => {});
   }
 }
-// Saved devices (host, MAC, username, model) are kept in ~/.ctrlpi/.
-const CONFIG_PATH = path.join(os.homedir(), '.ctrlpi', 'pi-bay-devices.json');
+// Saved devices (host, MAC, username, model) are kept in ~/.ctrlpi/ (or the --config folder).
+const CONFIG_PATH = CONFIG_FILES.devices;
 const PAGE = fs.readFileSync(path.join(__dirname, 'page.html'), 'utf8');
 const sessions = new Map();
 const mcpSessions = new Map();
@@ -1080,7 +1185,7 @@ free -m 2>/dev/null | awk '/^Mem:/ {print $2 "|" $3 "|" $4}' || cat /proc/meminf
   {
     name: 'pi_command_run',
     title: 'Run a shell command on a device',
-    description: 'Execute a shell command on the remote device via SSH. Returns stdout, stderr, and exit_code.',
+    description: 'Execute a non-interactive shell command on the remote device via SSH, as the signed-in user. Returns stdout, stderr, and exit_code. Use the file tools for files; a command that prompts fails or waits until timeout_ms.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1114,7 +1219,7 @@ free -m 2>/dev/null | awk '/^Mem:/ {print $2 "|" $3 "|" $4}' || cat /proc/meminf
   {
     name: 'pi_files_list',
     title: 'List files on a device',
-    description: 'List files and directories on the remote device relative to $HOME.',
+    description: 'List one directory on the remote device relative to $HOME, not recursive: path, name, isDir, isLink, size and mtime for each entry, folders first.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1334,7 +1439,7 @@ free -m 2>/dev/null | awk '/^Mem:/ {print $2 "|" $3 "|" $4}' || cat /proc/meminf
   {
     name: 'pi_device_reboot',
     title: 'Reboot a device',
-    description: 'Reboot the remote Raspberry Pi or SSH device.',
+    description: 'Reboot the remote Raspberry Pi or SSH device with sudo reboot (needs passwordless sudo). Returns at once without confirming; open sessions drop until the device boots again.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1449,6 +1554,7 @@ free -m 2>/dev/null | awk '/^Mem:/ {print $2 "|" $3 "|" $4}' || cat /proc/meminf
       const args = validateToolArgs(raw, ['action']);
       const action = args.action === undefined ? 'open' : args.action;
       if (action !== 'open' && action !== 'stop') throw new Error('action must be one of: open, stop');
+      if (mcpOnly) throw new Error('pi-bay runs with --ui off, so its web UI is off.');
       return mcpToolResult(action === 'stop' ? await stopUi() : await openUi(context));
     }
   }
@@ -1782,6 +1888,7 @@ function mcpHttpError(res, status, id, code, message, data) {
 let mcpHttpActive = 0;
 
 // Streamable HTTP transport: one JSON-RPC message per POST, answered with plain JSON (no SSE).
+// Needs the MCP key in Api-Key.
 async function handleMcpHttp(req, res) {
   if (!validMcpOrigin(req)) {
     mcpHttpError(res, 403, null, -32020, 'Invalid Origin header');
@@ -1790,6 +1897,11 @@ async function handleMcpHttp(req, res) {
   if (req.method !== 'POST') {
     res.writeHead(405, { Allow: 'POST' });
     res.end();
+    return;
+  }
+  if (!mcpKeyAccepted(req)) {
+    console.error('[SECURITY] /mcp refused from ' + req.socket.remoteAddress + ': wrong or missing Api-Key');
+    sendJSON(res, 403, { error: 'Invalid or missing Api-Key header' });
     return;
   }
   let msg;
@@ -1839,6 +1951,53 @@ async function handleMcpHttp(req, res) {
   sendJSON(res, unknownModernMethod ? 404 : 200, response);
 }
 
+// GET /hello: no key, so ctrlpi-remote can find pi-bay on the LAN. `key` is true once
+// a key is set, false while still on the default (claimable).
+function handleHello(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD' });
+    res.end();
+    return;
+  }
+  sendJSON(res, 200, { service: 'pi-bay', key: mcpKey() !== DEFAULT_MCP_KEY });
+}
+
+// POST /remote-config {"api_key": "<new>"} with the current key in Api-Key: changes the
+// MCP key over the network. Never claims a key (that is /mcp's job).
+async function handleRemoteConfig(req, res) {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { Allow: 'POST' });
+    res.end();
+    return;
+  }
+  if (!validMcpOrigin(req) || !keysMatch(req.headers['api-key'], mcpKey())) {
+    console.error('[SECURITY] /remote-config refused from ' + req.socket.remoteAddress + ': wrong or missing Api-Key');
+    sendJSON(res, 403, { error: 'Invalid or missing Api-Key header' });
+    return;
+  }
+  let body;
+  try { body = JSON.parse((await readBody(req, 4 * 1024)).toString('utf8')); }
+  catch (error) {
+    if (String(error.message || error) === 'Request too large') {
+      sendJSON(res, 413, { error: 'Request body exceeds 4096 bytes' });
+      return;
+    }
+    body = null;
+  }
+  const key = body && typeof body === 'object' ? body.api_key : undefined;
+  if (typeof key !== 'string' || !NEW_MCP_KEY.test(key) || key === DEFAULT_MCP_KEY) {
+    sendJSON(res, 400, { error: 'api_key must be 1-128 printable characters without spaces, and not the default key' });
+    return;
+  }
+  const keySet = nowStamp();
+  if (!saveMcpKey(key, keySet)) {
+    sendJSON(res, 500, { error: 'Could not save the new key' });
+    return;
+  }
+  console.error('MCP Api-Key changed through /remote-config and saved to ' + MCP_CONFIG_PATH + '.');
+  sendJSON(res, 200, { key_set: keySet });
+}
+
 // ── Routing ─────────────────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost'); const p = url.pathname; const q = Object.fromEntries(url.searchParams);
@@ -1848,9 +2007,18 @@ const server = http.createServer(async (req, res) => {
       const name = String(req.headers.host || '').replace(/:\d+$/, '').slice(0, 100);
       return sendJSON(res, 403, { error: 'Host not allowed: ' + name + '. Open pi-bay by IP address, or start it with --allow-host ' + name });
     }
-    if (p === '/mcp' && enableMcp) {
+    // Discovery and the MCP key change, for ctrlpi-remote.
+    if (p === '/hello') return handleHello(req, res);
+    if (p === '/remote-config') return await handleRemoteConfig(req, res);
+    if (p === '/mcp' && (enableMcp || mcpOnly)) {
       await handleMcpHttp(req, res);
       return;
+    }
+    if (mcpOnly) return sendJSON(res, 404, { error: 'Not found' });
+    // State-changing API requests must come from this page (same origin).
+    if (p.startsWith('/api/') && !['GET','HEAD'].includes(req.method)) {
+      const origin = req.headers.origin;
+      if (origin && new URL(origin).host !== req.headers.host) return sendJSON(res, 403, { error: 'Cross-origin request rejected' });
     }
     if (p === '/api/mcp') {
       if (req.method === 'GET') {
@@ -1863,11 +2031,6 @@ const server = http.createServer(async (req, res) => {
         enableMcp = q.enabled === '1';
         return sendJSON(res, 200, { enabled: enableMcp });
       }
-    }
-    // State-changing API requests must come from this page (same origin).
-    if (p.startsWith('/api/') && !['GET','HEAD'].includes(req.method)) {
-      const origin = req.headers.origin;
-      if (origin && new URL(origin).host !== req.headers.host) return sendJSON(res, 403, { error: 'Cross-origin request rejected' });
     }
     // The page, with its version filled in.
     if (p === '/') {
@@ -2089,7 +2252,7 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url, 'http://localhost');
-  if (u.pathname !== '/terminal' || !hostAllowed(req.headers.host, ALLOW_HOSTS)) return socket.destroy();
+  if (mcpOnly || u.pathname !== '/terminal' || !hostAllowed(req.headers.host, ALLOW_HOSTS)) return socket.destroy();
   const s = sessions.get(u.searchParams.get('session'));
   if (!s) return socket.destroy();
   wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req, s));
@@ -2148,6 +2311,7 @@ function startWeb() {
     if (PORT && port !== PORT) console.log(`Port ${PORT} is in use, using ${port}`);
     console.log(`pi-bay: ${url}`);
     if (enableMcp) console.log(`mcp: ${url}/mcp`);
+    console.log(`ui: ${mcpOnly ? 'off' : 'on'}, mcp: ${enableMcp ? `http (key set: ${loadOwnConfig().mcp?.key_set === true ? 'yes' : 'no'})` : 'off'}`);
     if (shouldOpenBrowser(noOpen, RASPBERRY_PI_HOST)) openBrowser(url);
   }, error => {
     const busy = extra ? `Ports ${PORT} to ${PORT + extra} are already in use: ${HOST}` : `Port is already in use: ${HOST}:${PORT}`;
@@ -2160,12 +2324,12 @@ function startWeb() {
 
 if (require.main === module) {
   // Refuse conflicting MCP flags, run stdio MCP alone, or start the web server.
-  if (conflictingMcpFlags) {
-    console.error('--no-mcp cannot be used with --mcp-stdio or --mcp-http');
-    process.exit(1);
-  } else if (mcpStdio && cliMcpHttp) {
-    console.error('Choose one MCP transport: --mcp-stdio or --mcp-http');
-    process.exit(1);
+  if (CONFIG_ARG === '' || (CONFIG_ARG && CONFIG_ARG.startsWith('--'))) {
+    console.error('--config needs a folder or a .json file');
+    process.exit(2);
+  } else if (mode.error) {
+    console.error(mode.error);
+    process.exit(2);
   } else if (mcpStdio) {
     runMcpStdio();
   } else if (mcpAutodetect && stdinIsPipe()) {
@@ -2181,6 +2345,7 @@ if (require.main === module) {
 
 // Exported for the tests.
 module.exports = {
+  parseMode,
   server,
   shutdown,
   sessions,
@@ -2197,6 +2362,7 @@ module.exports = {
   remoteUiUrl,
   MCP_TOOLS,
   selectMcpTransports,
+  resolveConfigFiles,
   hostAllowed,
   isRaspberryPi,
   resolveDevice,
@@ -2204,6 +2370,7 @@ module.exports = {
   connectSSH,
   setMcpHttp(enabled) { enableMcp = !!enabled; },
   getMcpHttp() { return enableMcp; },
+  setMcpOnly(enabled) { mcpOnly = !!enabled; },
   // Internals the tests reach into.
   _test: {
     localIPv4,

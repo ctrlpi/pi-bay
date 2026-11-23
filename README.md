@@ -1,7 +1,7 @@
 # Pi Bay
 
 [![Platform: Cross-Platform](https://img.shields.io/badge/platform-Cross--Platform-006400.svg)](#quick-start)
-[![Version 0.9.41](https://img.shields.io/badge/version-0.9.41-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
+[![Version 0.9.50](https://img.shields.io/badge/version-0.9.50-blue.svg)](https://github.com/ctrlpi/pi-bay/tags)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-blue.svg)](https://nodejs.org/)
 [![Protocol: MCP](https://img.shields.io/badge/protocol-MCP-006400.svg)](#mcp-server)
 [![Tools: 13](https://img.shields.io/badge/tools-13-006400.svg)](#mcp-tools)
@@ -19,7 +19,7 @@ Requires Node.js 20 or newer and SSH enabled on the target device.
 npx pi-bay
 ```
 
-Your browser will open automatically! If it doesn't, head to [http://localhost:8383](http://localhost:8383).
+Your browser will open automatically! If it doesn't, head to [http://localhost:3141](http://localhost:3141).
 
 ## Devices
 
@@ -49,51 +49,41 @@ Your browser will open automatically! If it doesn't, head to [http://localhost:8
 
 ## MCP server
 
-pi-bay includes a dependency-free [Model Context Protocol](https://modelcontextprotocol.io/) server, enabled by default on Raspberry Pi hosts. On macOS and other non-Pi hosts, enable MCP in the user interface or with `--mcp-stdio` or `--mcp-http`.
+pi-bay includes a dependency-free [Model Context Protocol](https://modelcontextprotocol.io/) server, enabled by default on Raspberry Pi hosts. On macOS and other non-Pi hosts, enable MCP in the user interface or with `--mcp stdio` or `--mcp http`.
 
-### Agent configuration
+### Claude Desktop and Claude Code
 
-In Claude Desktop, open **Settings → Developer → Edit Config** to get to the configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, or the equivalent file on Windows or Linux), and add the server under `mcpServers`. `--mcp-stdio` is optional here: pi-bay detects an MCP client on stdin and starts stdio on its own.
+In Claude Desktop, open **Plugins** in the sidebar, choose **Add > Add marketplace** and enter `ctrlpi/claude-plugins`. The marketplace appears as `ctrlpi`; install `pi-bay` from it.
 
-```json
-{
-  "mcpServers": {
-    "pi-bay": {
-      "command": "npx",
-      "args": ["-y", "pi-bay", "--mcp-stdio"]
-    }
-  }
-}
-```
-
-Cursor takes the same JSON, here and under Streamable HTTP. Put it in `~/.cursor/mcp.json`, or in `.cursor/mcp.json` inside a project.
+In Claude Code, run `/plugin marketplace add ctrlpi/claude-plugins`, then `/plugin install pi-bay@ctrlpi`.
 
 ### Streamable HTTP
 
-Use HTTP when the MCP client runs on another computer or Raspberry Pi:
+To use pi-bay on a remote computer or Raspberry Pi, start it there:
 
 ```sh
-npx pi-bay --mcp-http
+npx pi-bay
 ```
 
-The normal web interface remains available and MCP is served at `http://HOST:8383/mcp`. Configure the MCP agent to connect over HTTP, replacing `PI_HOST_ADDR` with the platform running pi-bay:
+A Raspberry Pi serves MCP on the network by default; on another computer, add `--mcp http --host 0.0.0.0`.
+
+On the desktop, install `pi-bay-remote` from the `ctrlpi/claude-plugins` marketplace, or add [ctrlpi-remote](https://github.com/ctrlpi/ctrlpi-remote) to any MCP client:
 
 ```json
 {
   "mcpServers": {
-    "pi-bay": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://PI_HOST_ADDR:8383/mcp", "--allow-http"]
-    }
+    "pi-bay-remote": { "command": "npx", "args": ["-y", "ctrlpi-remote", "pi-bay"] }
   }
 }
 ```
 
-`--allow-http` permits the connection over a trusted local network. On macOS and other non-Pi hosts, add `--host 0.0.0.0` when starting pi-bay to make it reachable from another computer. A Raspberry Pi listens on the LAN by default.
+ctrlpi-remote finds pi-bay on your network and claims its key the first time. Nothing else to set.
 
-> **No authentication or TLS:** MCP tools can run shell commands, overwrite and delete files, install software, and reboot devices. HTTP mode is intended only for a trusted local network. Do not expose `/mcp` or pi-bay’s port directly to the internet.
+> **Key, no TLS:** `/mcp` accepts only the claimed key, saved in `~/.ctrlpi/pi-bay-config.json` on the remote machine (delete `mcp.api_key` there to reset). The web interface has no key: disable it with `--ui off`, so nothing answers without the key. Plain HTTP: trusted networks only.
 
 The server supports MCP revision `2026-07-28` and the legacy initialize flow through `2025-03-26`. It uses plain JSON responses rather than SSE because it does not send server-initiated messages.
+
+You can also use it with [mcp-remote](https://github.com/geelen/mcp-remote) from any client that only speaks stdio: `npx -y mcp-remote http://<host>:3141/mcp --allow-http --header "Api-Key:<your-mcp-key>"`. Unlike ctrlpi-remote, it does not find the server or claim its key for you.
 
 ### Signing in
 
@@ -182,7 +172,7 @@ npx pi-bay
 ## Options
 
 ```text
-pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--api-port PORT] [--api-key KEY] [--no-open] [--mcp-stdio | --mcp-http | --no-mcp] [--help] [--version]
+pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--api-port PORT] [--api-key KEY] [--no-open] [--ui on|off] [--mcp off|http|stdio] [--config PATH] [--help] [--version]
 ```
 
 <table width="100%">
@@ -198,7 +188,7 @@ pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--a
     <tr>
       <td width="20%"><code>--port</code></td>
       <td width="20%"><code>PORT</code></td>
-      <td width="13%"><code>8383</code></td>
+      <td width="13%"><code>3141</code></td>
       <td width="47%">Web server port. When the default is busy on a desktop, one of the next 3 is used.</td>
     </tr>
     <tr>
@@ -238,22 +228,22 @@ pi-bay [--port PORT] [--host ADDRESS] [--allow-host NAME] [--ssh-port PORT] [--a
       <td width="47%">Do not automatically open the default browser on start. Browsers are never opened automatically on Raspberry Pi hosts.</td>
     </tr>
     <tr>
-      <td width="20%"><code>--mcp-stdio</code></td>
-      <td width="20%"><code>PI_BAY_MCP_STDIO</code></td>
-      <td width="13%"><code>false</code></td>
-      <td width="47%">Run only the MCP stdio transport. Optional when an MCP client starts pi-bay: it is detected automatically.</td>
+      <td width="20%"><code>--ui on|off</code></td>
+      <td width="20%"><code>PI_BAY_UI</code></td>
+      <td width="13%"><code>on</code></td>
+      <td width="47%">Serve the web interface and its API. <code>off</code> serves only HTTP MCP (with its key), <code>/hello</code> and <code>/remote-config</code>, and <code>pi_ui</code> refuses.</td>
     </tr>
     <tr>
-      <td width="20%"><code>--mcp-http</code></td>
-      <td width="20%"><code>PI_BAY_MCP_HTTP</code></td>
-      <td width="13%">Pi only</td>
-      <td width="47%">Add Streamable HTTP MCP at <code>/mcp</code> to the normal web server. Enabled automatically on Raspberry Pi hosts.</td>
+      <td width="20%"><code>--mcp off|http|stdio</code></td>
+      <td width="20%"><code>PI_BAY_MCP</code></td>
+      <td width="13%"><code>http</code> on a Pi, else <code>off</code></td>
+      <td width="47%">MCP transport: <code>http</code> adds Streamable HTTP MCP at <code>/mcp</code>, <code>stdio</code> runs only the stdio transport (no web interface). With neither <code>--ui</code> nor <code>--mcp</code> given, an MCP client that starts pi-bay is detected automatically and gets stdio.</td>
     </tr>
     <tr>
-      <td width="20%"><code>--no-mcp</code></td>
-      <td width="20%"><code>PI_BAY_NO_MCP</code></td>
-      <td width="13%"><code>false</code></td>
-      <td width="47%">Disable all MCP transports, including the Raspberry Pi HTTP default.</td>
+      <td width="20%"><code>--config</code></td>
+      <td width="20%">-</td>
+      <td width="13%"><code>~/.ctrlpi</code></td>
+      <td width="47%">The folder for <code>pi-bay-config.json</code> (the MCP key) and <code>pi-bay-devices.json</code> (saved devices), or the key file's own <code>.json</code> path.</td>
     </tr>
     <tr>
       <td width="20%"><code>--help</code></td>
@@ -276,7 +266,7 @@ Boolean environment variables accept `true` or `false`, and `1` or `0`.
 
 ## Running on a Raspberry Pi
 
-On Linux, pi-bay checks `/proc/device-tree/model`. When the host is a Raspberry Pi, it listens on `0.0.0.0` by default so another computer on the same network can open it. It does not try to launch a browser on the Pi itself, and Streamable HTTP MCP is enabled at `/mcp` by default. Start with `--no-mcp` to disable MCP while keeping the web interface available, or switch MCP off from the top-right menu while it runs.
+On Linux, pi-bay checks `/proc/device-tree/model`. When the host is a Raspberry Pi, it listens on `0.0.0.0` by default so another computer on the same network can open it. It does not try to launch a browser on the Pi itself, and Streamable HTTP MCP is enabled at `/mcp` by default. Start with `--mcp off` to disable MCP while keeping the web interface available, or switch MCP off from the top-right menu while it runs.
 
 Only expose pi-bay on a trusted network. It has no login of its own and can run commands on, and change files of, every device it has signed in to.
 

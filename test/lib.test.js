@@ -357,9 +357,8 @@ test('selectMcpTransports resolves stdio and http transports correctly', () => {
   assert.deepEqual(selectMcpTransports({ ...base, raspberryPiHost: true }), { stdio: false, http: true });
   // Non-Pi host defaults to disabled
   assert.deepEqual(selectMcpTransports({ ...base, raspberryPiHost: false }), { stdio: false, http: false });
-  // env vars
-  assert.deepEqual(selectMcpTransports({ ...base, envStdio: '1' }), { stdio: true, http: false });
-  assert.deepEqual(selectMcpTransports({ ...base, envHttp: '1' }), { stdio: false, http: true });
+  // stdio on a Raspberry Pi turns the default HTTP off
+  assert.deepEqual(selectMcpTransports({ ...base, raspberryPiHost: true, cliStdio: true }), { stdio: true, http: false });
 });
 
 test('shouldOpenBrowser honors flags and host', () => {

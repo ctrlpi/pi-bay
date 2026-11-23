@@ -44,6 +44,24 @@
     padding: 0 16px;
     z-index: 20;
   }
+  /* Red banner under the top bar while the Pi Bay server does not answer. */
+  #connection-status {
+    display: none;
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    background: #ffebe9;
+    border-bottom: 1px solid #ff8182;
+    color: #82071e;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: center;
+  }
+  #connection-status.visible { display: block; }
+  html.dark-mode #connection-status {
+    background: rgba(248,81,73,0.15);
+    border-bottom-color: rgba(248,81,73,0.4);
+    color: #f85149;
+  }
   #topbar .brand {
     font-weight: 600;
     font-size: 14px;
@@ -1532,6 +1550,9 @@
   </span>
 </header>
 
+<!-- Shown while the Pi Bay server does not answer. -->
+<div id="connection-status" role="status" aria-live="polite">Connection to the Pi Bay server was lost. Check that the server is still running; reconnecting automatically…</div>
+
 <!-- Hidden Upload Inputs -->
 <input type="file" id="uploadInput" multiple style="display:none" onchange="handleFilesUpload(event)">
 <input type="file" id="uploadFolderInput" webkitdirectory directory multiple style="display:none" onchange="handleFolderUpload(event)">
@@ -1743,6 +1764,52 @@
     el._timer = setTimeout(() => { el.className = ''; }, 3000);
   }
 
+  // ── Server Connection ──
+  // Every request goes through serverFetch(), and a check every 3 s notices a stopped server while
+  // the page is idle: the red banner shows and the device menu is disabled until it answers again.
+  let serverConnected = null;
+  function setServerConnected(connected) {
+    if (connected === serverConnected) return;
+    const wasDisconnected = serverConnected === false;
+    serverConnected = connected;
+    $('#connection-status').classList.toggle('visible', !connected);
+    if (!connected) {
+      setMenuDeviceEnabled(false);
+    } else if (wasDisconnected) {
+      setMenuDeviceEnabled(!!token);
+      toast('Reconnected to the Pi Bay server', 'good');
+      if ($('#scanText').textContent === 'Scan failed') scan();
+      checkSession();
+    }
+  }
+  // fetch() that also tracks whether the server is reachable.
+  async function serverFetch(url, opt) {
+    let r;
+    try {
+      r = await fetch(url, opt);
+    } catch {
+      setServerConnected(false);
+      throw new Error('Cannot reach the Pi Bay server. Check that it is still running; reconnecting automatically.');
+    }
+    setServerConnected(true);
+    return r;
+  }
+  // A restarted server has lost the SSH session: go back to the devices and sign in again.
+  async function checkSession() {
+    if (!token || !chosen) return;
+    const d = chosen;
+    try {
+      await json('/api/files?path=');
+    } catch (e) {
+      if (e.message !== 'Not connected') return;
+      sessionCache.delete(cacheKey(d));
+      resetWorkspace();
+      openLogin(d, 'The previous session expired. Please connect again.');
+    }
+  }
+  // /api/mcp answers whether HTTP MCP is on or off, and changes nothing.
+  setInterval(() => serverFetch('/api/mcp').catch(() => {}), 3000);
+
   // ── Hover Tooltip ──
   const hoverTooltipEl = $('#hover-tooltip');
   let tooltipTarget = null;
@@ -1850,7 +1917,7 @@
     busy(true);
     try {
       opt.headers = { ...(opt.headers || {}), ...(token ? { 'X-Pi-Session': token } : {}) };
-      const r = await fetch(url, opt);
+      const r = await serverFetch(url, opt);
       const d = await r.json();
       if (!r.ok || d.error) throw new Error(d.error || 'Request failed');
       return d;
@@ -2057,7 +2124,7 @@
     renderDevices();
     busy(true);
     try {
-      const response = await fetch('/api/devices/stream' + (force ? '?refresh=1' : ''));
+      const response = await serverFetch('/api/devices/stream' + (force ? '?refresh=1' : ''));
       if (!response.ok || !response.body) throw new Error('Scan request failed');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -2987,6 +3054,13 @@
     try {
       await json('/api/disconnect', { method: 'POST' });
     } catch {}
+    resetWorkspace();
+    toast('Disconnected', 'good');
+    busy(false);
+  }
+
+  // Leaves the open device and shows the devices list.
+  function resetWorkspace() {
     token = '';
     chosen = null;
     clearViewer();
@@ -2996,8 +3070,6 @@
     setMenuDeviceEnabled(false);
     renderDevices();
     showDevicesTab();
-    toast('Disconnected', 'good');
-    busy(false);
   }
 
   // Toggle Pi USB Power: types a uhubctl power cycle (every switchable hub off, 3 s, back on) into the
@@ -3176,7 +3248,7 @@
     closeMenu();
     busy(true);
     try {
-      const res = await fetch('/api/readme');
+      const res = await serverFetch('/api/readme');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const raw = await res.text();
       let mdText = raw;

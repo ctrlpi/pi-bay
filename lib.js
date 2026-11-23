@@ -234,14 +234,11 @@ function envEnabled(val) {
   return ['1', 'true', 'yes'].includes(String(val || '').toLowerCase());
 }
 
-// Which MCP transports run: flags win over the environment, --no-mcp turns both off,
-// and a Raspberry Pi gets HTTP unless stdio was chosen.
+// Which MCP transports run: --mcp turns one on or off; with none given a Raspberry Pi gets HTTP.
 function selectMcpTransports(options) {
   if (options.noMcp) return { stdio: false, http: false };
-  const cliTransport = options.cliStdio || options.cliHttp;
-  const stdio = cliTransport ? options.cliStdio : envEnabled(options.envStdio);
-  const http = cliTransport ? options.cliHttp :
-    envEnabled(options.envHttp) || (options.raspberryPiHost && !stdio);
+  const stdio = options.cliStdio;
+  const http = options.cliHttp || (options.raspberryPiHost && !options.cliStdio);
   return { stdio, http };
 }
 
